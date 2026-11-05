@@ -1,0 +1,184 @@
+package hu.hanizso.raktar.ui
+
+import android.app.Application
+import android.media.AudioManager
+import android.media.ToneGenerator
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
+import android.content.Context
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import hu.hanizso.raktar.data.LocalState
+import hu.hanizso.raktar.data.Move
+import hu.hanizso.raktar.data.MoveType
+import hu.hanizso.raktar.data.Product
+import hu.hanizso.raktar.data.Settings
+import hu.hanizso.raktar.data.StockLevel
+import hu.hanizso.raktar.data.Store
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+
+enum class Tab { OUT, IN, STOCK, LOG }
+
+sealed class ScanResult {
+    data class Done(val product: Product, val move: Move, val qtyAfter: Int, val minQty: Int, val undone: Boolean = false) : ScanResult()
+    data class Unknown(val code: String) : ScanResult()
+    data class Info(val text: String) : ScanResult()
+}
+
+data class DaySummaryLine(val name: String, val units: Int)
+data class Summary(
+    val lines: List<DaySummaryLine>,
+    val totalUnits: Int,
+    val low: List<Product>,
+    val syncError: String?,
+    val pushedMoves: Int,
+)
+
+class AppViewModel(app: Application) : AndroidViewModel(app) {
+    val store = Store.get(app)
+    val state: StateFlow<LocalState> = store.state
+    val settings: StateFlow<Settings> = store.settings
+
+    private val _syncing = MutableStateFlow(false)
+    val syncing = _syncing.asStateFlow()
+
+    private val _message = MutableStateFlow<String?>(null)
+    val message = _message.asStateFlow()
+
+    private val _scan = MutableStateFlow<ScanResult?>(null)
+    val scan = _scan.asStateFlow()
+
+    private val _summary = MutableStateFlow<Summary?>(null)
+    val summary = _summary.asStateFlow()
+
+    val tab = MutableStateFlow(Tab.OUT)
+    val inQty = MutableStateFlow(1)
+
+    private val tone = try { ToneGenerator(AudioManager.STREAM_MUSIC, 85) } catch (e: Exception) { null }
+
+    init {
+        if (store.isConfigured) syncNow(silent = true)
+    }
+
+    fun clearMessage() { _message.value = null }
+    fun clearScan() { _scan.value = null }
+    fun closeSummary() { _summary.value = null }
+
+    /* ---------------- vonalkód ---------------- */
+
+    fun findByCode(raw: String): Product? {
+        val c = raw.trim().replace(Regex("\\s+"), "")
+        if (c.isEmpty()) return null
+        val cz = c.trimStart('0')
+        val list = state.value.products()
+        return list.firstOrNull { it.ean.isNotBlank() && (it.ean == c || (cz.isNotEmpty() && it.ean.trimStart('0') == cz)) }
+            ?: list.firstOrNull { it.sku.isNotBlank() && it.sku.equals(c, ignoreCase = true) }
+    }
+
+    fun onCode(raw: String) {
+        val code = raw.trim().replace(Regex("\\s+"), "")
+        if (code.isEmpty()) return
+        val p = findByCode(code)
+        if (p == null) {
+            feedback(false)
+            _scan.value = ScanResult.Unknown(code)
+            return
+        }
+        val delta = if (tab.value == Tab.IN) inQty.value.coerceAtLeast(1) else -1
+        val type = if (tab.value == Tab.IN) MoveType.IN else MoveType.OUT
+        viewModelScope.launch {
+            val m = store.addMove(p, delta, type)
+            val after = m.qtyAfter ?: (p.qty + delta)
+            feedback(true, warn = after <= p.minQty)
+            _scan.value = ScanResult.Done(p, m, after, p.minQty)
+        }
+    }
+
+    fun undo(r: ScanResult.Done) {
+        viewModelScope.launch {
+            store.undoMove(r.move)
+            val now = state.value.products().firstOrNull { it.id == r.product.id }?.qty ?: (r.qtyAfter - r.move.delta)
+            _scan.value = r.copy(qtyAfter = now, undone = true)
+        }
+    }
+
+    fun quickAdjust(p: Product, delta: Int) {
+        viewModelScope.launch { store.addMove(p, delta, MoveType.MANUAL) }
+    }
+
+    private fun feedback(ok: Boolean, warn: Boolean = false) {
+        try {
+            tone?.startTone(if (!ok) ToneGenerator.TONE_SUP_ERROR else if (warn) ToneGenerator.TONE_PROP_BEEP2 else ToneGenerator.TONE_PROP_BEEP, if (ok) 120 else 300)
+        } catch (_: Exception) {}
+        try {
+            val ctx = getApplication<Application>()
+            val vib: Vibrator = if (Build.VERSION.SDK_INT >= 31)
+                (ctx.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+            else @Suppress("DEPRECATION") (ctx.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator)
+            vib.vibrate(if (ok) VibrationEffect.createOneShot(60, VibrationEffect.DEFAULT_AMPLITUDE)
+                        else VibrationEffect.createWaveform(longArrayOf(0, 120, 80, 120), -1))
+        } catch (_: Exception) {}
+    }
+
+    /* ---------------- termékek ---------------- */
+
+    fun saveProduct(p: Product, qty: Int) = viewModelScope.launch { store.saveProduct(p, qty); _message.value = "Mentve" }
+    fun deleteProduct(id: String) = viewModelScope.launch { store.deleteProduct(id); _message.value = "Termék törölve" }
+
+    /* ---------------- szinkron ---------------- */
+
+    fun syncNow(silent: Boolean = false) {
+        if (_syncing.value) return
+        if (!store.isConfigured) { if (!silent) _message.value = "Előbb add meg a web app címét és a kulcsot a Beállításokban."; return }
+        viewModelScope.launch {
+            _syncing.value = true
+            try {
+                val r = store.sync()
+                if (!silent) _message.value = r.pushed?.let { "Elküldve: ${it.applied} mozgás. Készlet frissítve." } ?: "Készlet frissítve."
+            } catch (e: Exception) {
+                _message.value = e.message ?: "Nem sikerült a szinkronizálás."
+            } finally {
+                _syncing.value = false
+            }
+        }
+    }
+
+    fun endPacking() {
+        if (_syncing.value) return
+        viewModelScope.launch {
+            val today = LocalDate.now()
+            val zone = ZoneId.systemDefault()
+            val s = state.value
+            val all = (s.serverMoves + s.pendingMoves).distinctBy { it.id }
+                .filter { Instant.ofEpochMilli(it.at).atZone(zone).toLocalDate() == today && it.type == MoveType.OUT }
+            val lines = all.groupBy { it.productId }.map { (_, ms) -> DaySummaryLine(ms.first().name, -ms.sumOf { it.delta }) }
+                .filter { it.units != 0 }.sortedByDescending { it.units }
+            val pendingBefore = s.pendingMoves.size
+            var err: String? = null
+            if (store.isConfigured) {
+                _syncing.value = true
+                try { store.sync() } catch (e: Exception) { err = e.message } finally { _syncing.value = false }
+            } else err = "Nincs beállítva a szerver, ezért nem lett elküldve."
+            val low = state.value.products().filter { it.level != StockLevel.OK }.sortedBy { it.qty }
+            _summary.value = Summary(lines, lines.sumOf { it.units }, low, err, if (err == null) pendingBefore else 0)
+        }
+    }
+
+    fun saveSettings(s: Settings) { store.saveSettings(s); _message.value = "Beállítások mentve"; syncNow(silent = false) }
+
+    fun testConnection(s: Settings) {
+        viewModelScope.launch {
+            _message.value = try { store.testConnection(s); "A kapcsolat működik." } catch (e: Exception) { e.message }
+        }
+    }
+
+    override fun onCleared() { tone?.release(); super.onCleared() }
+}
