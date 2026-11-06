@@ -1,6 +1,6 @@
 # Telepítés: Google-táblázat és Apps Script
 
-Ezt egyszer kell megcsinálni, számítógépen, böngészőben (az evbarnazsolt@gmail.com fiókkal).
+Ezt egyszer kell megcsinálni, számítógépen, böngészőben (a saját Google-fiókoddal).
 
 ## 1. A táblázat
 1. Nyisd meg a **HaNiZso Raktár** táblázatot a Google Drive-on (vagy hozz létre egy üres táblázatot ezzel a névvel).
@@ -27,7 +27,7 @@ Ezt egyszer kell megcsinálni, számítógépen, böngészőben (az evbarnazsolt
 2. A fogaskerék ikonnál a típus: **Webalkalmazás (Web app)**.
 3. Beállítások:
    - **Leírás:** HaNiZso Raktár
-   - **Végrehajtás mint (Execute as):** *Én* (evbarnazsolt@gmail.com)
+   - **Végrehajtás mint (Execute as):** *Én*
    - **Ki férhet hozzá (Who has access):** *Bárki (Anyone)*
 4. **Telepítés**, majd másold ki a **Webalkalmazás URL-jét** (`https://script.google.com/macros/s/…/exec`). Ezt is be kell írni az app Beállításaiba.
 

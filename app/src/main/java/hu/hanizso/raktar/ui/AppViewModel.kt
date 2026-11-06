@@ -17,6 +17,7 @@ import hu.hanizso.raktar.data.Product
 import hu.hanizso.raktar.data.Settings
 import hu.hanizso.raktar.data.StockLevel
 import hu.hanizso.raktar.data.Store
+import hu.hanizso.raktar.data.Updater
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -31,6 +32,15 @@ sealed class ScanResult {
     data class Done(val product: Product, val move: Move, val qtyAfter: Int, val minQty: Int, val undone: Boolean = false) : ScanResult()
     data class Unknown(val code: String) : ScanResult()
     data class Info(val text: String) : ScanResult()
+}
+
+sealed class UpdateState {
+    data object Idle : UpdateState()
+    data object Checking : UpdateState()
+    data object UpToDate : UpdateState()
+    data class Available(val info: Updater.Available) : UpdateState()
+    data class Downloading(val info: Updater.Available, val progress: Float) : UpdateState()
+    data class Error(val text: String) : UpdateState()
 }
 
 data class DaySummaryLine(val name: String, val units: Int)
@@ -64,8 +74,49 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private val tone = try { ToneGenerator(AudioManager.STREAM_MUSIC, 85) } catch (e: Exception) { null }
 
+    val update = MutableStateFlow<UpdateState>(UpdateState.Idle)
+
     init {
         if (store.isConfigured) syncNow(silent = true)
+        // naponta egyszer magától is megnézi, van-e új verzió
+        val prefs = app.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        if (System.currentTimeMillis() - prefs.getLong("upd_last", 0) > 20 * 3600_000L) {
+            prefs.edit().putLong("upd_last", System.currentTimeMillis()).apply()
+            checkUpdate(manual = false)
+        }
+    }
+
+    fun checkUpdate(manual: Boolean = true) {
+        if (update.value is UpdateState.Checking || update.value is UpdateState.Downloading) return
+        viewModelScope.launch {
+            update.value = UpdateState.Checking
+            update.value = try {
+                Updater.check()?.let { UpdateState.Available(it) } ?: UpdateState.UpToDate
+            } catch (e: Exception) {
+                if (manual) UpdateState.Error(e.message ?: "Nem sikerült ellenőrizni.") else UpdateState.Idle
+            }
+        }
+    }
+
+    fun startUpdate() {
+        val ctx = getApplication<Application>()
+        val st = update.value
+        val info = (st as? UpdateState.Available)?.info ?: return
+        if (!Updater.canInstall(ctx)) {
+            _message.value = "Engedélyezd a telepítést ennek az appnak, majd koppints újra a frissítésre."
+            Updater.openInstallPermission(ctx)
+            return
+        }
+        viewModelScope.launch {
+            update.value = UpdateState.Downloading(info, 0f)
+            try {
+                val f = Updater.download(ctx, info) { p -> update.value = UpdateState.Downloading(info, p) }
+                update.value = UpdateState.Available(info)
+                Updater.install(ctx, f)
+            } catch (e: Exception) {
+                update.value = UpdateState.Error(e.message ?: "A frissítés nem sikerült.")
+            }
+        }
     }
 
     fun clearMessage() { _message.value = null }

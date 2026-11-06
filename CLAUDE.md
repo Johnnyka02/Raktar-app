@@ -4,7 +4,7 @@ Ez a fájl a projekt teljes műszaki leírása. Minden munkamenet elején ezt ol
 A részletes háttér a `docs/FEJLESZTES.md`-ben van.
 
 ## Kinek és mire
-- Tulajdonos: Barna Zsolt (BARNA ZSOLT EV., GitHub: Johnnyka02, Google: evbarnazsolt@gmail.com).
+- Tulajdonos: Barna Zsolt (BARNA ZSOLT EV., GitHub: Johnnyka02, Google: a tulajdonos Google-fiókja).
   Temu-eladó (illatszer, mosószer, öblítő, háztartási vegyiáru), saját magyar raktárral.
 - Cél: a StoDo raktárkezelő app kiváltása egy saját Android appal, aminek az adatait
   **a Claude is látja** (Google Sheets-összekötővel), hogy készletet elemezzen és
@@ -22,7 +22,7 @@ Android app (Kotlin, Compose)  ──HTTPS POST JSON──►  Google Apps Scrip
                                                      Claude (Sheets-összekötő) ────────┘ olvassa
 ```
 - Google-táblázat: **"HaNiZso Raktár"**, ID: `1LsSQ1vo5UA76pWWB3iufE1RuBTAWAKzPJOOZ9Lhahiw`
-  (evbarnazsolt@gmail.com Drive-ján). Lapok: `Termékek`, `Mozgások`, `Mappák`, `Import`.
+  (a tulajdonos Google-fiókja Drive-ján). Lapok: `Termékek`, `Mozgások`, `Mappák`, `Import`.
 - Termékfotók: Drive „HaNiZso Raktár képek” mappa (ID a Script Properties `PHOTO_FOLDER_ID`-ban),
   a Termékek „Kép” oszlopában a Drive-link.
 - Apps Script: `apps-script/Code.gs`, a táblázathoz kötve, web appként közzétéve
@@ -95,10 +95,18 @@ Az Apps Script POST válasza 302 → googleusercontent GET; az OkHttp ezt helyes
   (gitignore-ban!) vagy környezeti változókból: `KEYSTORE_PATH`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`, `VERSION_CODE`.
 - CI: `.github/workflows/build.yml` – push a `main`-re → aláírt APK, **versionCode = 100 + run_number**
   (hogy mindig nagyobb legyen a helyben fordított 1.0.x verzióknál), GitHub Release `v1.0.<versionCode>` taggel.
-- Helyi kiadásnál mindig adj meg növekvő `VERSION_CODE`-ot (eddig: 1 = 1.0.1, 2 = 1.0.2, 3 = 1.0.3, 4 = 1.0.4). Titkok: `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_PASSWORD`, `KEY_ALIAS` (=`raktar`).
+- Helyi kiadásnál mindig adj meg növekvő `VERSION_CODE`-ot (eddig: 1 = 1.0.1 … 5 = 1.0.5). Titkok: `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_PASSWORD`, `KEY_ALIAS` (=`raktar`).
 - A kulcstár (`hanizso-raktar.jks`, alias `raktar`) a felhasználónál van. **Soha ne commitold, ne generálj újat**
   (más kulccsal aláírt APK nem frissíti a telepítettet). Ha kell, kérd el tőle.
 - Az első APK (1.0.1, versionCode 1) helyben készült és alá van írva ugyanazzal a kulccsal.
+
+## Frissítés az appon belül (1.0.5-től)
+- `data/Updater.kt`: a GitHub Releases `latest` kiadását nézi (`api.github.com/repos/Johnnyka02/Raktar-app/releases/latest`, hitelesítés nélkül → **a tárolónak nyilvánosnak kell lennie**).
+- A címke formátuma `v1.0.<versionCode>`, a melléklet az APK. Ha a címke száma > `BuildConfig.VERSION_CODE`, az app felajánlja a frissítést (indításkor naponta 1×, és a Beállításokban kézzel).
+- Letöltés `cacheDir/updates/`-be, telepítés FileProvider + `REQUEST_INSTALL_PACKAGES`; első alkalommal az „ismeretlen forrás” engedélyt kéri.
+- **Új verzió kiadása innen:** `VERSION_CODE=<n> ./gradlew assembleRelease`, majd
+  `gh release create v1.0.<n> app/build/outputs/apk/release/app-release.apk#HaNiZso-Raktar-1.0.<n>.apk -R Johnnyka02/Raktar-app --title "HaNiZso Raktár 1.0.<n>" --notes "<mi változott, magyarul>"`.
+- A tárolóban nincs titok (kulcs, URL, jelszó); a korábbi commitok a tulajdonos Gmail-címét tartalmazhatják.
 
 ## Ismert környezeti buktatók (Claude felhős munkamenet)
 - Az Android-letöltésekhez a felhasználó engedélyezte: dl.google.com, maven.google.com, services.gradle.org, plugins.gradle.org, repo.maven.apache.org.

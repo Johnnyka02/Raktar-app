@@ -130,7 +130,9 @@ fun MainScreen(vm: AppViewModel = viewModel()) {
     }
 
     if (showSettings) {
-        SettingsScreen(settings, onBack = { showSettings = false }, onSave = { vm.saveSettings(it); showSettings = false }, onTest = vm::testConnection)
+        val upd by vm.update.collectAsState()
+        SettingsScreen(settings, onBack = { showSettings = false }, onSave = { vm.saveSettings(it); showSettings = false }, onTest = vm::testConnection,
+            update = upd, onCheckUpdate = { vm.checkUpdate(true) }, onStartUpdate = vm::startUpdate)
         return
     }
 
@@ -195,6 +197,12 @@ fun MainScreen(vm: AppViewModel = viewModel()) {
                 modifier = Modifier.align(Alignment.Center).fillMaxWidth(0.85f),
             )
         Column(Modifier.fillMaxSize()) {
+            val upd by vm.update.collectAsState()
+            when (val u = upd) {
+                is UpdateState.Available -> Banner("Új verzió érhető el: ${u.info.versionName}. Koppints ide a frissítéshez.", vm::startUpdate)
+                is UpdateState.Downloading -> Banner("Frissítés letöltése… ${(u.progress * 100).toInt()}%") {}
+                else -> {}
+            }
             if (!vm.store.isConfigured) {
                 Banner("Az első használat előtt add meg a web app címét és a kulcsot a Beállításokban.") { showSettings = true }
             }
@@ -438,7 +446,10 @@ private fun SummaryDialog(s: Summary, onClose: () -> Unit) {
 /* ======================= BEÁLLÍTÁSOK ======================= */
 
 @Composable
-private fun SettingsScreen(current: Settings, onBack: () -> Unit, onSave: (Settings) -> Unit, onTest: (Settings) -> Unit) {
+private fun SettingsScreen(
+    current: Settings, onBack: () -> Unit, onSave: (Settings) -> Unit, onTest: (Settings) -> Unit,
+    update: UpdateState, onCheckUpdate: () -> Unit, onStartUpdate: () -> Unit,
+) {
     var url by remember { mutableStateOf(current.url) }
     var key by remember { mutableStateOf(current.key) }
     var dev by remember { mutableStateOf(current.deviceName) }
@@ -456,6 +467,20 @@ private fun SettingsScreen(current: Settings, onBack: () -> Unit, onSave: (Setti
             }
             Text("A címet és a kulcsot a Google-táblázatban találod: Raktár menü → API kulcs megjelenítése, illetve a web app közzétételekor kapott cím.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            Text("Az app verziója: ${hu.hanizso.raktar.data.Updater.currentVersionName}", fontWeight = FontWeight.SemiBold)
+            when (update) {
+                is UpdateState.Available -> {
+                    Text("Elérhető az új verzió: ${update.info.versionName}", color = OkGreen)
+                    if (update.info.notes.isNotBlank()) Text(update.info.notes, style = MaterialTheme.typography.bodySmall)
+                    Button(onClick = onStartUpdate) { Text("Letöltés és telepítés") }
+                }
+                is UpdateState.Downloading -> Text("Letöltés… ${(update.progress * 100).toInt()}%")
+                is UpdateState.Checking -> Text("Ellenőrzés…")
+                is UpdateState.UpToDate -> { Text("Ez a legújabb verzió.", color = OkGreen); OutlinedButton(onClick = onCheckUpdate) { Text("Frissítés keresése") } }
+                is UpdateState.Error -> { Text(update.text, color = BadRed); OutlinedButton(onClick = onCheckUpdate) { Text("Újra") } }
+                UpdateState.Idle -> OutlinedButton(onClick = onCheckUpdate) { Text("Frissítés keresése") }
+            }
         }
     }
 }
