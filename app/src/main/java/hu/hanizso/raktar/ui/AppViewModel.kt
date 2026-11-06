@@ -21,6 +21,8 @@ import hu.hanizso.raktar.data.Updater
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
@@ -163,6 +165,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val key = "$type:${p.id}"
             val total = (sessionTotals[key] ?: 0) + delta
             sessionTotals[key] = total
+            scheduleAutoSync()
             feedback(true, warn = after <= p.minQty)
             _scan.value = ScanResult.Done(p, m, after, p.minQty, sessionTotal = total)
         }
@@ -181,7 +184,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun quickAdjust(p: Product, delta: Int) {
-        viewModelScope.launch { store.addMove(p, delta, MoveType.MANUAL) }
+        viewModelScope.launch { store.addMove(p, delta, MoveType.MANUAL); scheduleAutoSync() }
     }
 
     private fun feedback(ok: Boolean, warn: Boolean = false) {
@@ -210,6 +213,33 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteProduct(id: String) = viewModelScope.launch { store.deleteProduct(id); _message.value = "Termék törölve" }
 
     /* ---------------- szinkron ---------------- */
+
+    /* ---------------- automatikus küldés ---------------- */
+
+    private var idleJob: Job? = null
+
+    /**
+     * Minden mozgás után hívjuk: 10 el nem küldött mozgásnál azonnal küld,
+     * különben 5 perc tétlenség után. Hibánál csendben marad (a fejléc mutatja a várakozókat),
+     * a következő alkalommal újra próbálja.
+     */
+    private fun scheduleAutoSync() {
+        if (!store.isConfigured) return
+        if (state.value.pendingMoves.size >= AUTO_SYNC_COUNT) autoSync()
+        idleJob?.cancel()
+        idleJob = viewModelScope.launch {
+            delay(AUTO_SYNC_IDLE_MS)
+            if (state.value.pendingCount > 0) autoSync()
+        }
+    }
+
+    private fun autoSync() {
+        if (_syncing.value) return
+        viewModelScope.launch {
+            _syncing.value = true
+            try { store.sync() } catch (_: Exception) { } finally { _syncing.value = false }
+        }
+    }
 
     fun syncNow(silent: Boolean = false) {
         if (_syncing.value) return
@@ -256,6 +286,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _message.value = try { store.testConnection(s); "A kapcsolat működik." } catch (e: Exception) { e.message }
         }
+    }
+
+    companion object {
+        const val AUTO_SYNC_COUNT = 10
+        const val AUTO_SYNC_IDLE_MS = 5 * 60_000L
     }
 
     override fun onCleared() { tone?.release(); super.onCleared() }

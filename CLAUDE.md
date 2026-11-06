@@ -36,6 +36,7 @@ Android app (Kotlin, Compose)  ──HTTPS POST JSON──►  Google Apps Scrip
 2. Csomagolás közben minden **helyben** történik (`LocalState.pendingMoves` stb.), fájlba mentve.
 3. „Csomagolás vége” gomb → `push`, a válaszban friss termékek + 90 napi napló jön.
 4. Biztonsági háló: `ProcessLifecycleOwner.onStop` → `SyncWorker` (WorkManager, hálózat feltétellel).
+4b. Automatikus küldés csomagolás közben (`AppViewModel.scheduleAutoSync`): 10 el nem küldött mozgásnál azonnal, különben 5 perc tétlenség után; hiba esetén csendben marad.
 5. **A mozgás mindig VÁLTOZÁS (delta), soha nem végső készlet.** A szerver hozzáadja.
 6. **Idempotencia:** minden mozgásnak kliens-UUID-je van; a szerver a már meglévő
    `Mozgás ID`-t kihagyja → ismételt küldés nem von le kétszer.
@@ -119,9 +120,8 @@ Az Apps Script POST válasza 302 → googleusercontent GET; az OkHttp ezt helyes
 - A felhős konténer ideiglenes: az SDK-t és a kulcsot nem tárolja tartósan.
 
 ## Állapot (2026-11-06)
-- Kész: Apps Script (szimulált táblázaton tesztelve: delta, idempotencia, törlés, import, rossz kulcs, mappák, fotó feltöltés/csere/letöltés),
-  Android app 1.0.2 (mappák, fotó, EAN-olvasó az űrlapon, többsoros leírás, ékezetfüggetlen keresés), CI workflow.
-- Hátra van / a felhasználóra vár: Apps Script bemásolása és közzététele, GitHub-titkok beállítása, első valós teszt a telefonon, StoDo-export importja.
+- Élesben használva: Apps Script közzétéve, StoDo-ból 248 termék + 243 fotó importálva, első valós csomagolás rendben.
+- A tároló nyilvános, a GitHub-titkok beállítva, a CI aláírt kiadást készít (első: v1.0.112); az app ebből frissít.
 - Ötletek később: napló régebbi időszakra (`log` action már megvan), Estella-árlista összevetés a felügyelő ügynökben,
   utánrendelési lista exportja, termékfotó.
 
