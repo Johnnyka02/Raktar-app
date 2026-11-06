@@ -64,7 +64,9 @@ Az Apps Script POST válasza 302 → googleusercontent GET; az OkHttp ezt helyes
 - **Mozgások:** Időpont | Mozgás ID | Termék ID | EAN | Megnevezés | Változás | Típus | Készlet utána | Eszköz
 - Típusok: `kiadás`, `bevét`, `korrekció`, `kézi`, `visszavonás`, `import`.
 - EAN és Cikkszám szöveg formátumú (vezető nullák!). Időzóna: Europe/Budapest.
-- `Raktár` menü: Táblázat előkészítése, StoDo import az Import lapról, API kulcs megjelenítése / új kulcs.
+- `Raktár` menü: Táblázat előkészítése, StoDo import az Import lapról, StoDo képek importálása (KépImport lap), API kulcs megjelenítése / új kulcs.
+- StoDo export sajátosságai: a Csoportútvonal `\` elválasztót használ (a `cleanPath_` kezeli), a képek az xlsx-be ágyazva (xl/media + drawing1.xml horgonyok). Képimport: a KépImport lap B1 = az xlsx Drive-ID-ja, 3. sortól kép fájlneve | vonalkód | név; az Apps Script `Utilities.unzip`-pel bontja ki.
+- Importnál vonalkód esetén CSAK vonalkód alapján egyeztet (azonos nevű, más vonalkódú termék külön marad); név alapján csak vonalkód nélküli sor.
 
 ## Android app
 - Csomag: `hu.hanizso.raktar`, minSdk 26, target/compile 35, Kotlin 2.0.21, AGP 8.7.3, Gradle wrapper 8.11.1, JDK 17 cél.

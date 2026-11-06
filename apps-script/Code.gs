@@ -19,6 +19,7 @@ var SHEET_PRODUCTS = 'Termékek';
 var SHEET_MOVES = 'Mozgások';
 var SHEET_IMPORT = 'Import';
 var SHEET_FOLDERS = 'Mappák';
+var SHEET_IMG_IMPORT = 'KépImport';
 var PHOTO_FOLDER_NAME = 'HaNiZso Raktár képek';
 
 var P_HEAD = ['ID', 'EAN', 'Cikkszám', 'Megnevezés', 'Készlet', 'Minimum',
@@ -41,6 +42,7 @@ function onOpen() {
   SpreadsheetApp.getUi().createMenu('Raktár')
     .addItem('Táblázat előkészítése', 'menuSetup')
     .addItem('StoDo import az Import lapról', 'menuImport')
+    .addItem('StoDo képek importálása (KépImport lap)', 'menuImportImages')
     .addSeparator()
     .addItem('API kulcs megjelenítése', 'menuShowKey')
     .addItem('Új API kulcs generálása', 'menuNewKey')
@@ -460,7 +462,8 @@ function importFromSheet_() {
       var name = String(d[col.name] || '').trim();
       if (!name) continue;
       var ean = col.ean != null ? String(d[col.ean] || '').replace(/\s+/g, '') : '';
-      var idx = (ean && byEan[normEan_(ean)] != null) ? byEan[normEan_(ean)] : byName[fold_(name)];
+      // Ha van vonalkód, csak az alapján egyeztet (azonos nevű, de más vonalkódú termék külön termék marad)
+      var idx = ean ? byEan[normEan_(ean)] : byName[fold_(name)];
       var isNew = idx == null;
       if (isNew) {
         var row = new Array(P_HEAD.length).fill('');
@@ -512,6 +515,71 @@ function importFromSheet_() {
 }
 
 /* ------------------------------------------------------------------ */
+/* StoDo képek importálása                                            */
+/* ------------------------------------------------------------------ */
+/*
+ * KépImport lap: B1 = a StoDo Excel-export (.xlsx, beágyazott képekkel) Drive-azonosítója,
+ * 3. sortól: A = kép útvonala a zip-ben (pl. xl/media/image1.jpeg) | B = Vonalkód | C = Név.
+ * A képeket a "HaNiZso Raktár képek" mappába menti, és a termék Kép oszlopába írja a linket.
+ * A már képpel rendelkező termékeket kihagyja, így időtúllépés után újra futtatható.
+ */
+function menuImportImages() {
+  SpreadsheetApp.getUi().alert(importImages_());
+}
+
+function importImages_() {
+  setupIfNeeded_();
+  var ss = SpreadsheetApp.getActive();
+  var is = ss.getSheetByName(SHEET_IMG_IMPORT);
+  if (!is) return 'Nincs KépImport lap.';
+  var fileId = String(is.getRange('B1').getValue() || '').trim();
+  if (!fileId) return 'A KépImport lap B1 cellájába kell a StoDo export fájl Drive-azonosítója.';
+  var zipBlob = DriveApp.getFileById(fileId).getBlob().setContentType('application/zip');
+  var parts = Utilities.unzip(zipBlob);
+  var byPath = {};
+  parts.forEach(function (b) { byPath[b.getName()] = b; byPath[b.getName().split('/').pop()] = b; });
+  var last = is.getLastRow();
+  var map = last >= 3 ? is.getRange(3, 1, last - 2, 3).getValues() : [];
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var ps = ss.getSheetByName(SHEET_PRODUCTS);
+    var pLast = ps.getLastRow();
+    if (pLast < 2) return 'Előbb a termékeket kell importálni (Raktár → StoDo import).';
+    var rows = ps.getRange(2, 1, pLast - 1, P_HEAD.length).getValues();
+    var byEan = {}, byName = {};
+    rows.forEach(function (r, i) {
+      if (r[P.ean]) byEan[normEan_(r[P.ean])] = i;
+      byName[fold_(r[P.name])] = i;
+    });
+    var folder = photoFolder_();
+    var start = Date.now(), done = 0, had = 0, noProduct = 0, noImage = 0, timeout = false;
+    for (var k = 0; k < map.length; k++) {
+      if (Date.now() - start > 300000) { timeout = true; break; }
+      var m = map[k];
+      if (!m[0]) continue;
+      var ean = String(m[1] || '').trim();
+      var idx = (ean && byEan[normEan_(ean)] != null) ? byEan[normEan_(ean)] : byName[fold_(m[2])];
+      if (idx == null) { noProduct++; continue; }
+      if (rows[idx][P.photo]) { had++; continue; }
+      var blob = byPath[String(m[0])] || byPath[String(m[0]).split('/').pop()];
+      if (!blob) { noImage++; continue; }
+      var name = (rows[idx][P.ean] ? String(rows[idx][P.ean]) + ' - ' : '') + String(rows[idx][P.name]);
+      var file = folder.createFile(blob.copyBlob().setName(name.slice(0, 80) + '.jpg'));
+      rows[idx][P.photo] = 'https://drive.google.com/file/d/' + file.getId() + '/view';
+      done++;
+    }
+    ps.getRange(2, P.photo + 1, rows.length, 1).setValues(rows.map(function (r) { return [r[P.photo]]; }));
+  } finally {
+    lock.releaseLock();
+  }
+  return 'Képimport: ' + done + ' új kép.' + (had ? ' ' + had + ' terméknek már volt képe.' : '') +
+    (noProduct ? ' ' + noProduct + ' képhez nem találtam terméket.' : '') + (noImage ? ' ' + noImage + ' kép hiányzott a fájlból.' : '') +
+    (timeout ? '\n\nNem fért bele az időbe: futtasd újra ugyanezt a menüt, a maradékkal folytatja.' : '');
+}
+
+/* ------------------------------------------------------------------ */
 /* Segédfüggvények                                                    */
 /* ------------------------------------------------------------------ */
 
@@ -523,7 +591,7 @@ function fold_(s) {
 
 /** "Mosószer / Mosógél" → "Mosószer/Mosógél" (a StoDo „>” elválasztóját is kezeli) */
 function cleanPath_(s) {
-  return String(s || '').split(/[\/>]/).map(function (x) { return x.trim(); }).filter(String).join('/');
+  return String(s || '').split(/[\/>\\]/).map(function (x) { return x.trim(); }).filter(String).join('/');
 }
 
 function numOr_(v, d) { var n = Number(v); return isFinite(n) ? n : d; }
