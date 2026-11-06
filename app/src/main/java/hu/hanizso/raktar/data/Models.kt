@@ -13,6 +13,10 @@ data class Product(
     val buyPrice: Double? = null,
     val sellPrice: Double? = null,
     val note: String = "",
+    /** Mappa útvonala, pl. "Mosószer/Mosógél"; üres = nincs mappában */
+    val category: String = "",
+    /** A Drive-on tárolt fotó azonosítója (üres, ha nincs) */
+    val photoId: String = "",
 ) {
     val level: StockLevel
         get() = when {
@@ -60,8 +64,27 @@ data class LocalState(
     val pendingProducts: List<Product> = emptyList(),
     val pendingDeletes: List<String> = emptyList(),
     val lastSync: Long = 0,
+    val serverFolders: List<String> = emptyList(),
+    val pendingFolders: List<String> = emptyList(),
+    val pendingFolderDeletes: List<String> = emptyList(),
+    /** Termék ID-k, amelyek fotója még nincs feltöltve */
+    val pendingPhotos: List<String> = emptyList(),
 ) {
-    val pendingCount: Int get() = pendingMoves.size + pendingProducts.size + pendingDeletes.size
+    val pendingCount: Int get() = pendingMoves.size + pendingProducts.size + pendingDeletes.size +
+        pendingFolders.size + pendingFolderDeletes.size + pendingPhotos.size
+
+    /** Minden mappa (a szülőkkel együtt), ábécérendben. */
+    fun folders(): List<String> {
+        val set = sortedSetOf<String>(compareBy({ it.lowercase() }, { it }))
+        fun addWithParents(path: String) {
+            val parts = path.split('/').map { it.trim() }.filter { it.isNotEmpty() }
+            for (i in parts.indices) set.add(parts.subList(0, i + 1).joinToString("/"))
+        }
+        (serverFolders + pendingFolders).forEach(::addWithParents)
+        pendingFolderDeletes.forEach { d -> set.removeAll { it == d || it.startsWith("$d/") } }
+        products().forEach { if (it.category.isNotBlank()) addWithParents(it.category) }
+        return set.toList()
+    }
 
     /** A telefonon látható készlet: szerver állapot + még el nem küldött változások. */
     fun products(): List<Product> {

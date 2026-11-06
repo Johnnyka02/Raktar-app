@@ -117,6 +117,7 @@ fun MainScreen(vm: AppViewModel = viewModel()) {
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Product?>(null) }
     var editingNew by remember { mutableStateOf(false) }
+    var stockFolder by rememberSaveable { mutableStateOf("") }
     val snack = remember { SnackbarHostState() }
 
     LaunchedEffect(message) {
@@ -129,8 +130,19 @@ fun MainScreen(vm: AppViewModel = viewModel()) {
     }
 
     val openNew: (String) -> Unit = { code ->
-        editing = Product(id = UUID.randomUUID().toString(), ean = code, name = "", minQty = 2)
+        editing = Product(id = UUID.randomUUID().toString(), ean = code, name = "", minQty = 2,
+            category = if (tab == Tab.STOCK) stockFolder else "")
         editingNew = true
+    }
+
+    editing?.let { p ->
+        ProductScreen(
+            vm = vm, product = p, isNew = editingNew, folders = state.folders(),
+            onClose = { editing = null },
+            onSave = { np, q, photo -> vm.saveProduct(np, q, photo); editing = null; vm.clearScan() },
+            onDelete = { vm.deleteProduct(p.id); editing = null },
+        )
+        return
     }
 
     Scaffold(
@@ -175,21 +187,16 @@ fun MainScreen(vm: AppViewModel = viewModel()) {
             }
             when (tab) {
                 Tab.OUT, Tab.IN -> ScanScreen(vm, tab, onNew = openNew)
-                Tab.STOCK -> StockScreen(state.products(), onEdit = { editing = it; editingNew = false }, onAdjust = vm::quickAdjust)
+                Tab.STOCK -> StockScreen(
+                    vm = vm, products = state.products(), folders = state.folders(),
+                    folder = stockFolder, onFolder = { stockFolder = it },
+                    onEdit = { editing = it; editingNew = false }, onAdjust = vm::quickAdjust,
+                )
                 Tab.LOG -> LogScreen(state.serverMoves, state.pendingMoves)
             }
         }
     }
 
-    editing?.let { p ->
-        ProductDialog(
-            product = p, isNew = editingNew,
-            eanTaken = { ean -> vm.findByCode(ean)?.takeIf { it.id != p.id }?.name },
-            onDismiss = { editing = null },
-            onSave = { np, q -> vm.saveProduct(np, q); editing = null; vm.clearScan() },
-            onDelete = { vm.deleteProduct(p.id); editing = null },
-        )
-    }
     summary?.let { SummaryDialog(it, onClose = vm::closeSummary) }
 }
 
@@ -286,6 +293,7 @@ private fun ResultCard(r: ScanResult, onUndo: (ScanResult.Done) -> Unit, onNew: 
                 else -> OkSoft to OkGreen
             }
             ColoredCard(bg, fg) {
+                ProductThumb(r.product, 96)
                 Text(r.product.name, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface.let { if (bg == MaterialTheme.colorScheme.surfaceVariant) it else Color(0xFF16201C) })
                 if (r.undone) {
                     Text("Visszavonva. Készlet: ${r.qtyAfter} db")
@@ -311,67 +319,6 @@ private fun ColoredCard(bg: Color, fg: Color, content: @Composable () -> Unit) {
     }
 }
 
-/* ======================= KÉSZLET ======================= */
-
-@Composable
-private fun StockScreen(products: List<Product>, onEdit: (Product) -> Unit, onAdjust: (Product, Int) -> Unit) {
-    var q by rememberSaveable { mutableStateOf("") }
-    var filter by rememberSaveable { mutableStateOf("all") }
-    val units = products.sumOf { it.qty.coerceAtLeast(0) }
-    val value = products.sumOf { it.qty.coerceAtLeast(0) * (it.buyPrice ?: 0.0) }
-    val list = products.filter {
-        when (filter) { "low" -> it.level != StockLevel.OK; "out" -> it.level == StockLevel.OUT; else -> true }
-    }.filter {
-        q.isBlank() || listOf(it.name, it.ean, it.sku, it.note).any { f -> f.contains(q.trim(), ignoreCase = true) }
-    }.let { l -> if (filter == "all") l.sortedBy { it.name.lowercase(HU) } else l.sortedBy { it.qty } }
-
-    Column(Modifier.fillMaxSize()) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("${products.size} termék · $units db · készletérték ${ft(value)}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            OutlinedTextField(q, { q = it }, label = { Text("Keresés: név, EAN, cikkszám") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(filter == "all", { filter = "all" }, { Text("Mind") })
-                FilterChip(filter == "low", { filter = "low" }, { Text("Kevés") })
-                FilterChip(filter == "out", { filter = "out" }, { Text("Elfogyott") })
-            }
-        }
-        if (products.isEmpty()) {
-            EmptyText("Még nincs termék. Töltsd le a készletet (frissítés gomb fent), importáld a StoDo exportot a táblázatban, vagy vegyél fel egyet a + gombbal.")
-        } else if (list.isEmpty()) {
-            EmptyText("Nincs a szűrésnek megfelelő termék.")
-        } else {
-            LazyColumn(contentPadding = PaddingValues(bottom = 88.dp)) {
-                items(list, key = { it.id }) { p ->
-                    Row(Modifier.fillMaxWidth().clickable { onEdit(p) }.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(p.name, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            val meta = listOfNotNull(p.ean.ifBlank { null }, p.sku.ifBlank { null }?.let { "cikkszám $it" }, "min. ${p.minQty}").joinToString(" · ")
-                            Text(meta, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        TextButton(onClick = { onAdjust(p, -1) }) { Text("−", fontSize = 20.sp) }
-                        QtyPill(p)
-                        TextButton(onClick = { onAdjust(p, 1) }) { Text("+", fontSize = 20.sp) }
-                    }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun QtyPill(p: Product) {
-    val (bg, fg) = when (p.level) { StockLevel.OUT -> BadSoft to BadRed; StockLevel.LOW -> WarnSoft to WarnAmber; StockLevel.OK -> OkSoft to OkGreen }
-    Box(Modifier.background(bg, RoundedCornerShape(8.dp)).widthIn(min = 48.dp).padding(horizontal = 10.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
-        Text("${p.qty}", color = fg, fontWeight = FontWeight.Bold)
-    }
-}
-
-@Composable
-private fun EmptyText(t: String) {
-    Text(t, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(24.dp))
-}
-
 /* ======================= NAPLÓ ======================= */
 
 private val typeLabel = mapOf(MoveType.OUT to "Kiadás", MoveType.IN to "Bevét", MoveType.FIX to "Korrekció", MoveType.MANUAL to "Kézi", "import" to "Import", "visszavonás" to "Visszavonás")
@@ -381,7 +328,7 @@ private fun LogScreen(server: List<Move>, pending: List<Move>) {
     var q by rememberSaveable { mutableStateOf("") }
     val pendingIds = pending.map { it.id }.toSet()
     val all = (server + pending).distinctBy { it.id }
-        .filter { q.isBlank() || it.name.contains(q.trim(), true) || it.ean.contains(q.trim()) || it.device.contains(q.trim(), true) }
+        .filter { q.isBlank() || fold(it.name).contains(fold(q.trim())) || it.ean.contains(q.trim()) || fold(it.device).contains(fold(q.trim())) }
         .sortedByDescending { it.at }
     val byDay = all.groupBy { zdt(it.at).toLocalDate() }
     val expanded = remember { mutableStateListOf<LocalDate>().apply { byDay.keys.firstOrNull()?.let { add(it) } } }
@@ -445,72 +392,6 @@ private fun LogScreen(server: List<Move>, pending: List<Move>) {
             }
         }
     }
-}
-
-/* ======================= TERMÉK ŰRLAP ======================= */
-
-@Composable
-private fun ProductDialog(
-    product: Product, isNew: Boolean, eanTaken: (String) -> String?,
-    onDismiss: () -> Unit, onSave: (Product, Int) -> Unit, onDelete: () -> Unit,
-) {
-    var name by remember { mutableStateOf(product.name) }
-    var ean by remember { mutableStateOf(product.ean) }
-    var sku by remember { mutableStateOf(product.sku) }
-    var qty by remember { mutableStateOf(if (isNew) "0" else product.qty.toString()) }
-    var min by remember { mutableStateOf(product.minQty.toString()) }
-    var buy by remember { mutableStateOf(product.buyPrice?.let { "%.0f".format(it) } ?: "") }
-    var sell by remember { mutableStateOf(product.sellPrice?.let { "%.0f".format(it) } ?: "") }
-    var note by remember { mutableStateOf(product.note) }
-    var confirmDelete by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (isNew) "Új termék" else "Termék szerkesztése") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutlinedTextField(name, { name = it }, label = { Text("Megnevezés *") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(ean, { ean = it.trim() }, label = { Text("EAN / vonalkód") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-                OutlinedTextField(sku, { sku = it }, label = { Text("Cikkszám") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(qty, { qty = it.filter { c -> c.isDigit() || c == '-' } }, label = { Text("Készlet") }, singleLine = true,
-                        modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-                    OutlinedTextField(min, { min = it.filter(Char::isDigit) }, label = { Text("Minimum") }, singleLine = true,
-                        modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(buy, { buy = it.filter { c -> c.isDigit() || c == ',' || c == '.' } }, label = { Text("Beszerzési ár") }, singleLine = true,
-                        modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
-                    OutlinedTextField(sell, { sell = it.filter { c -> c.isDigit() || c == ',' || c == '.' } }, label = { Text("Eladási ár") }, singleLine = true,
-                        modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
-                }
-                OutlinedTextField(note, { note = it }, label = { Text("Megjegyzés") }, modifier = Modifier.fillMaxWidth())
-                if (!isNew && qty != product.qty.toString()) Text("A készlet módosítása „korrekció”-ként kerül a naplóba.", style = MaterialTheme.typography.bodySmall)
-                error?.let { Text(it, color = BadRed) }
-                if (!isNew) {
-                    if (!confirmDelete) TextButton(onClick = { confirmDelete = true }) { Text("Termék törlése", color = BadRed) }
-                    else Button(onClick = onDelete, colors = ButtonDefaults.buttonColors(containerColor = BadRed)) { Text("Biztosan törlöd?") }
-                }
-            }
-        },
-        confirmButton = {
-            Button(onClick = {
-                val taken = ean.takeIf { it.isNotBlank() }?.let(eanTaken)
-                when {
-                    name.isBlank() -> error = "Add meg a megnevezést."
-                    taken != null -> error = "Ez a vonalkód már a(z) „$taken” terméknél szerepel."
-                    else -> onSave(
-                        product.copy(name = name.trim(), ean = ean, sku = sku.trim(), minQty = min.toIntOrNull() ?: 0,
-                            buyPrice = buy.replace(',', '.').toDoubleOrNull(), sellPrice = sell.replace(',', '.').toDoubleOrNull(), note = note.trim()),
-                        qty.toIntOrNull() ?: 0,
-                    )
-                }
-            }) { Text("Mentés") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Mégse") } },
-    )
 }
 
 /* ======================= CSOMAGOLÁS VÉGE ======================= */

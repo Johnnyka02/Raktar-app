@@ -22,7 +22,9 @@ Android app (Kotlin, Compose)  ──HTTPS POST JSON──►  Google Apps Scrip
                                                      Claude (Sheets-összekötő) ────────┘ olvassa
 ```
 - Google-táblázat: **"HaNiZso Raktár"**, ID: `1LsSQ1vo5UA76pWWB3iufE1RuBTAWAKzPJOOZ9Lhahiw`
-  (evbarnazsolt@gmail.com Drive-ján). Lapok: `Termékek`, `Mozgások`, `Import`.
+  (evbarnazsolt@gmail.com Drive-ján). Lapok: `Termékek`, `Mozgások`, `Mappák`, `Import`.
+- Termékfotók: Drive „HaNiZso Raktár képek” mappa (ID a Script Properties `PHOTO_FOLDER_ID`-ban),
+  a Termékek „Kép” oszlopában a Drive-link.
 - Apps Script: `apps-script/Code.gs`, a táblázathoz kötve, web appként közzétéve
   (Végrehajtás: én; Hozzáférés: bárki). Hitelesítés: Script Properties `API_KEY`,
   minden kérés JSON-jében `key` mezőként jön.
@@ -49,11 +51,16 @@ Android app (Kotlin, Compose)  ──HTTPS POST JSON──►  Google Apps Scrip
 | `pull` | `{key, logDays?=90}` | `{ok,time,products[],moves[]}` |
 | `push` | `{key, device, products[], deletes[], moves[], logDays?}` | `{ok,time,result{created,updated,deleted,applied,skipped,unknown},products[],moves[]}` |
 | `log`  | `{key, from, to?, productId?}` | `{ok,moves[]}` |
+| `photo` | `{key, productId, mime, data(base64)}` | `{ok, photoId}` – a régi fotót kukába teszi |
+| `photoGet` | `{key, photoId}` | `{ok, mime, data(base64)}` |
+A `pull` és `push` válasza `folders[]`-t is tartalmaz; a `push` kérés `folders[]` (új mappák) és `folderDeletes[]` mezőt is fogad.
 Hibák: `{ok:false,error:"unauthorized"|"busy"|"bad_json"|"unknown_action"|"server_error",message?}`.
 Az Apps Script POST válasza 302 → googleusercontent GET; az OkHttp ezt helyesen követi.
 
 ## Táblázat oszlopai (Code.gs `P` és `M` indexei – ne cseréld fel a sorrendet!)
-- **Termékek:** ID | EAN | Cikkszám | Megnevezés | Készlet | Minimum | Beszerzési ár | Eladási ár | Megjegyzés | Módosítva | Módosította
+- **Termékek:** ID | EAN | Cikkszám | Megnevezés | Készlet | Minimum | Beszerzési ár | Eladási ár | Leírás | Módosítva | Módosította | Mappa | Kép
+  (a JSON-ban a Leírás mező neve `note`, a Mappa `category`, a Kép `photoId`)
+- **Mappák:** Mappa (útvonal `/` elválasztóval, pl. `Mosószer/Mosógél`; az üres mappák miatt kell, a termékek mappái ettől függetlenül is látszanak)
 - **Mozgások:** Időpont | Mozgás ID | Termék ID | EAN | Megnevezés | Változás | Típus | Készlet utána | Eszköz
 - Típusok: `kiadás`, `bevét`, `korrekció`, `kézi`, `visszavonás`, `import`.
 - EAN és Cikkszám szöveg formátumú (vezető nullák!). Időzóna: Europe/Budapest.
@@ -69,16 +76,23 @@ Az Apps Script POST válasza 302 → googleusercontent GET; az OkHttp ezt helyes
   - `RaktarApp.kt` – háttérbe kerüléskor ütemezi a küldést
   - `ui/AppViewModel.kt` – vonalkód-kezelés, hang+rezgés, csomagolás vége összesítő
   - `ui/Scanner.kt` – CameraX + ML Kit (beépített modell); ugyanaz a kód csak 1,5 s „eltűnés” után számít újra
-  - `ui/Screens.kt` – Kiadás / Bevét / Készlet / Napló fül, termék-űrlap, beállítások, összesítő
+  - `ui/Screens.kt` – főképernyő, Kiadás / Bevét / Napló fül, beállítások, összesítő
+  - `ui/Stock.kt` – Készlet fül mappanézettel (morzsamenü, almappák, új/üres mappa törlése), ékezetfüggetlen keresés (`fold()`), bélyegképek
+  - `ui/ProductScreen.kt` – teljes képernyős termék-űrlap: fotó (kamera/galéria), EAN beolvasás kamerával, mappaválasztó, leírás
+  - `data/ImageUtil.kt` – fotó elforgatása (EXIF), kicsinyítés max. 1280 px, JPEG 80%, bélyegkép-gyorsítótár
   - `ui/Theme.kt` – színek (zöld-teal elsődleges, OK/Figyelem/Hiba színek)
+- Fotók: helyben `filesDir/photos/<termékID>.jpg`, feltöltés a szinkron végén (`pendingPhotos`), egyenként; hiba esetén a sorban marad.
+- Mappák: `LocalState.folders()` = szerver + várakozó mappák + a termékek mappái (szülőkkel), mínusz törölt. Csak üres mappa törölhető.
+- Kamerás olvasásnál ugyanaz a kód csak 1,5 s „eltűnés” után számít újra; kézi/Bluetooth bevitelnél minden csippantás számít.
 - Bluetooth/USB vonalkódolvasó: billentyűzetként a kézi beviteli mezőbe ír, Enter = beküldés (`onPreviewKeyEvent`).
 - ABI: csak `arm64-v8a`, `armeabi-v7a` (méret ~19 MB). Lint release-nél kikapcsolva.
 
 ## Fordítás és kiadás
 - Helyben: `export ANDROID_HOME=<sdk>; ./gradlew assembleRelease`. Aláírás `keystore.properties`-ből
   (gitignore-ban!) vagy környezeti változókból: `KEYSTORE_PATH`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`, `VERSION_CODE`.
-- CI: `.github/workflows/build.yml` – push a `main`-re → aláírt APK, versionCode = run_number,
-  GitHub Release `v1.0.<n>` taggel. Titkok: `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_PASSWORD`, `KEY_ALIAS` (=`raktar`).
+- CI: `.github/workflows/build.yml` – push a `main`-re → aláírt APK, **versionCode = 100 + run_number**
+  (hogy mindig nagyobb legyen a helyben fordított 1.0.x verzióknál), GitHub Release `v1.0.<versionCode>` taggel.
+- Helyi kiadásnál mindig adj meg növekvő `VERSION_CODE`-ot (eddig: 1 = 1.0.1, 2 = 1.0.2). Titkok: `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_PASSWORD`, `KEY_ALIAS` (=`raktar`).
 - A kulcstár (`hanizso-raktar.jks`, alias `raktar`) a felhasználónál van. **Soha ne commitold, ne generálj újat**
   (más kulccsal aláírt APK nem frissíti a telepítettet). Ha kell, kérd el tőle.
 - Az első APK (1.0.1, versionCode 1) helyben készült és alá van írva ugyanazzal a kulccsal.
@@ -91,8 +105,9 @@ Az Apps Script POST válasza 302 → googleusercontent GET; az OkHttp ezt helyes
 - A tároló új neve **Johnnyka02/Raktar-app** (a régi `raktar-app` átirányít).
 - A felhős konténer ideiglenes: az SDK-t és a kulcsot nem tárolja tartósan.
 
-## Állapot (2026-11-05)
-- Kész: Apps Script (szimulált táblázaton tesztelve: delta, idempotencia, törlés, import, rossz kulcs), Android app 1.0.1, CI workflow.
+## Állapot (2026-11-06)
+- Kész: Apps Script (szimulált táblázaton tesztelve: delta, idempotencia, törlés, import, rossz kulcs, mappák, fotó feltöltés/csere/letöltés),
+  Android app 1.0.2 (mappák, fotó, EAN-olvasó az űrlapon, többsoros leírás, ékezetfüggetlen keresés), CI workflow.
 - Hátra van / a felhasználóra vár: Apps Script bemásolása és közzététele, GitHub-titkok beállítása, első valós teszt a telefonon, StoDo-export importja.
 - Ötletek később: napló régebbi időszakra (`log` action már megvan), Estella-árlista összevetés a felügyelő ügynökben,
   utánrendelési lista exportja, termékfotó.

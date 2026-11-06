@@ -21,8 +21,16 @@ data class PushRequest(
     val products: List<Product>,
     val deletes: List<String>,
     val moves: List<Move>,
+    val folders: List<String> = emptyList(),
+    val folderDeletes: List<String> = emptyList(),
     val logDays: Int = 90,
 )
+
+@Serializable
+data class PhotoRequest(val key: String, val action: String = "photo", val productId: String, val mime: String = "image/jpeg", val data: String)
+
+@Serializable
+data class PhotoGetRequest(val key: String, val action: String = "photoGet", val photoId: String)
 
 @Serializable
 data class SimpleRequest(val key: String, val action: String, val logDays: Int = 90)
@@ -42,6 +50,9 @@ data class ServerResponse(
     val products: List<Product>? = null,
     val moves: List<Move>? = null,
     val result: PushResult? = null,
+    val folders: List<String>? = null,
+    val photoId: String? = null,
+    val data: String? = null,
 )
 
 object Api {
@@ -62,6 +73,17 @@ object Api {
     suspend fun ping(s: Settings): ServerResponse = post(s, json.encodeToString(SimpleRequest(s.key, "ping")))
 
     suspend fun push(s: Settings, req: PushRequest): ServerResponse = post(s, json.encodeToString(req))
+
+    suspend fun uploadPhoto(s: Settings, productId: String, jpeg: ByteArray): String {
+        val b64 = android.util.Base64.encodeToString(jpeg, android.util.Base64.NO_WRAP)
+        return post(s, json.encodeToString(PhotoRequest(s.key, productId = productId, data = b64))).photoId
+            ?: throw ApiException("A fotó feltöltése nem sikerült.")
+    }
+
+    suspend fun downloadPhoto(s: Settings, photoId: String): ByteArray {
+        val r = post(s, json.encodeToString(PhotoGetRequest(s.key, photoId = photoId)))
+        return android.util.Base64.decode(r.data ?: throw ApiException("A fotó nem tölthető le."), android.util.Base64.DEFAULT)
+    }
 
     private suspend fun post(s: Settings, body: String): ServerResponse = withContext(Dispatchers.IO) {
         if (s.url.isBlank() || s.key.isBlank()) throw ApiException("Nincs beállítva a web app címe vagy a kulcs (Beállítások).")
@@ -86,6 +108,7 @@ object Api {
             when (r.error) {
                 "unauthorized" -> "Hibás API kulcs. Másold be újra a táblázat Raktár → API kulcs menüjéből."
                 "busy" -> "A táblázat épp foglalt. Próbáld újra pár másodperc múlva."
+                "unknown_product" -> "A termék még nincs a táblázatban."
                 else -> "Szerverhiba: ${r.message ?: r.error ?: "ismeretlen"}"
             }
         )

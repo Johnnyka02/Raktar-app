@@ -37,21 +37,23 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          VERSION_CODE: ${{ github.run_number }}
         run: |
+          # A verziószám a helyi (kézi) kiadások fölött indul: 100 + futás sorszáma
+          export VERSION_CODE=$((GITHUB_RUN_NUMBER + 100))
+          echo "VC=$VERSION_CODE" >> $GITHUB_ENV
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon
-          cp app/build/outputs/apk/release/app-release.apk "HaNiZso-Raktar-1.0.${{ github.run_number }}.apk"
+          cp app/build/outputs/apk/release/app-release.apk "HaNiZso-Raktar-1.0.$VERSION_CODE.apk"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: HaNiZso-Raktar-1.0.${{ github.run_number }}
+          name: HaNiZso-Raktar-1.0.${{ env.VC }}
           path: HaNiZso-Raktar-*.apk
           retention-days: 90
 
       - name: Kiadás (Release) létrehozása
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: HaNiZso Raktár 1.0.${{ github.run_number }}
+          tag_name: v1.0.${{ env.VC }}
+          name: HaNiZso Raktár 1.0.${{ env.VC }}
           files: HaNiZso-Raktar-*.apk

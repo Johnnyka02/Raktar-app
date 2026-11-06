@@ -130,7 +130,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /* ---------------- termékek ---------------- */
 
-    fun saveProduct(p: Product, qty: Int) = viewModelScope.launch { store.saveProduct(p, qty); _message.value = "Mentve" }
+    fun saveProduct(p: Product, qty: Int, photo: ByteArray? = null) = viewModelScope.launch {
+        store.saveProduct(p, qty)
+        if (photo != null) store.setPhoto(p.id, photo)
+        _message.value = "Mentve"
+    }
+    fun addFolder(path: String) = viewModelScope.launch { store.addFolder(path); _message.value = "Mappa létrehozva" }
+    fun deleteFolder(path: String) = viewModelScope.launch { store.deleteFolder(path); _message.value = "Mappa törölve" }
     fun deleteProduct(id: String) = viewModelScope.launch { store.deleteProduct(id); _message.value = "Termék törölve" }
 
     /* ---------------- szinkron ---------------- */
@@ -142,7 +148,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             _syncing.value = true
             try {
                 val r = store.sync()
-                if (!silent) _message.value = r.pushed?.let { "Elküldve: ${it.applied} mozgás. Készlet frissítve." } ?: "Készlet frissítve."
+                if (r.photoError != null) _message.value = "Egy fotót nem sikerült feltölteni, a következő szinkronnál újra próbálja."
+                else if (!silent) _message.value = r.pushed?.let { "Elküldve: ${it.applied} mozgás. Készlet frissítve." } ?: "Készlet frissítve."
             } catch (e: Exception) {
                 _message.value = e.message ?: "Nem sikerült a szinkronizálás."
             } finally {

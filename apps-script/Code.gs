@@ -7,7 +7,10 @@
  * Lapok:
  *   Termékek  – egy termék = egy sor, a "Készlet" oszlop a valódi készlet
  *   Mozgások  – napló: minden kiadás, bevét, korrekció, import
+ *   Mappák    – a létrehozott mappák (pl. "Mosószer/Mosógél"), az üresek is
  *   Import    – ide kell bemásolni a StoDo Excel-exportját (fejléccel)
+ *
+ * A termékfotók a Drive "HaNiZso Raktár képek" mappájába kerülnek.
  *
  * A titkos kulcs a Script Properties "API_KEY" értéke (menü: Raktár → API kulcs).
  */
@@ -15,14 +18,16 @@
 var SHEET_PRODUCTS = 'Termékek';
 var SHEET_MOVES = 'Mozgások';
 var SHEET_IMPORT = 'Import';
+var SHEET_FOLDERS = 'Mappák';
+var PHOTO_FOLDER_NAME = 'HaNiZso Raktár képek';
 
 var P_HEAD = ['ID', 'EAN', 'Cikkszám', 'Megnevezés', 'Készlet', 'Minimum',
-  'Beszerzési ár', 'Eladási ár', 'Megjegyzés', 'Módosítva', 'Módosította'];
+  'Beszerzési ár', 'Eladási ár', 'Leírás', 'Módosítva', 'Módosította', 'Mappa', 'Kép'];
 var M_HEAD = ['Időpont', 'Mozgás ID', 'Termék ID', 'EAN', 'Megnevezés',
   'Változás', 'Típus', 'Készlet utána', 'Eszköz'];
 
 // Termékek oszlopindexek (0-tól)
-var P = { id: 0, ean: 1, sku: 2, name: 3, qty: 4, min: 5, buy: 6, sell: 7, note: 8, mod: 9, modBy: 10 };
+var P = { id: 0, ean: 1, sku: 2, name: 3, qty: 4, min: 5, buy: 6, sell: 7, note: 8, mod: 9, modBy: 10, cat: 11, photo: 12 };
 // Mozgások oszlopindexek
 var M = { at: 0, id: 1, pid: 2, ean: 3, name: 4, delta: 5, type: 6, after: 7, device: 8 };
 
@@ -75,6 +80,7 @@ function setup_() {
   var m = ensureSheet_(ss, SHEET_MOVES, M_HEAD);
   m.getRange('A:A').setNumberFormat('yyyy.mm.dd hh:mm:ss');
   m.getRange('D:D').setNumberFormat('@');
+  ensureSheet_(ss, SHEET_FOLDERS, ['Mappa']);
   ensureSheet_(ss, SHEET_IMPORT, null);
   var first = ss.getSheets()[0];
   if (first.getName() === 'Munkalap1' || first.getName() === 'Sheet1') {
@@ -88,6 +94,10 @@ function ensureSheet_(ss, name, head) {
   if (head && sh.getLastRow() === 0) {
     sh.getRange(1, 1, 1, head.length).setValues([head]).setFontWeight('bold');
     sh.setFrozenRows(1);
+  } else if (head) {
+    // régebbi verzióból maradt fejléc bővítése (új oszlopok a végén)
+    var cur = sh.getRange(1, 1, 1, head.length).getValues()[0];
+    if (cur.join('|') !== head.join('|')) sh.getRange(1, 1, 1, head.length).setValues([head]).setFontWeight('bold');
   }
   return sh;
 }
@@ -114,6 +124,8 @@ function doPost(e) {
     if (req.action === 'pull') return json_(pull_(req));
     if (req.action === 'push') return json_(push_(req));
     if (req.action === 'log') return json_(log_(req));
+    if (req.action === 'photo') return json_(photo_(req));
+    if (req.action === 'photoGet') return json_(photoGet_(req));
     if (req.action === 'ping') return json_({ ok: true, time: Date.now() });
     return json_({ ok: false, error: 'unknown_action' });
   } catch (err) {
@@ -136,6 +148,7 @@ function pull_(req) {
     ok: true,
     time: Date.now(),
     products: readProducts_().map(productToJson_),
+    folders: readFolders_(),
     moves: readMoves_(Date.now() - days * 864e5, null, null)
   };
 }
@@ -197,6 +210,7 @@ function push_(req) {
       r[P.buy] = p.buyPrice == null || p.buyPrice === '' ? '' : Number(p.buyPrice);
       r[P.sell] = p.sellPrice == null || p.sellPrice === '' ? '' : Number(p.sellPrice);
       r[P.note] = p.note ? String(p.note) : '';
+      r[P.cat] = p.category ? cleanPath_(p.category) : '';
       r[P.mod] = now;
       r[P.modBy] = device;
       if (r[P.ean]) byEan[normEan_(r[P.ean])] = idx;
@@ -232,6 +246,21 @@ function push_(req) {
     (req.deletes || []).forEach(function (id) { if (byId[String(id)] != null) { del[byId[String(id)]] = true; deleted++; } });
     var outRows = rows.filter(function (r, i) { return !del[i]; });
 
+    // 4. Mappák
+    var fs = ss.getSheetByName(SHEET_FOLDERS);
+    var folders = readFolders_();
+    var fset = {};
+    folders.forEach(function (f) { fset[f] = true; });
+    (req.folders || []).forEach(function (f) { f = cleanPath_(f); if (f) fset[f] = true; });
+    (req.folderDeletes || []).forEach(function (f) {
+      f = cleanPath_(f);
+      Object.keys(fset).forEach(function (k) { if (k === f || k.indexOf(f + '/') === 0) delete fset[k]; });
+    });
+    var fl = Object.keys(fset).sort();
+    var fLast = fs.getLastRow();
+    if (fLast > 1) fs.getRange(2, 1, fLast - 1, 1).clearContent();
+    if (fl.length) fs.getRange(2, 1, fl.length, 1).setValues(fl.map(function (f) { return [f]; }));
+
     // Visszaírás
     if (last > 1) ps.getRange(2, 1, last - 1, P_HEAD.length).clearContent();
     if (outRows.length) ps.getRange(2, 1, outRows.length, P_HEAD.length).setValues(outRows);
@@ -243,6 +272,7 @@ function push_(req) {
       ok: true, time: Date.now(),
       result: { created: created, updated: updated, deleted: deleted, applied: applied, skipped: skipped, unknown: unknown },
       products: outRows.filter(function (r) { return r[P.id]; }).map(productToJson_),
+      folders: fl,
       moves: readMoves_(Date.now() - days * 864e5, null, null)
     };
   } finally {
@@ -256,7 +286,7 @@ function push_(req) {
 
 function setupIfNeeded_() {
   var ss = SpreadsheetApp.getActive();
-  if (!ss.getSheetByName(SHEET_PRODUCTS) || !ss.getSheetByName(SHEET_MOVES)) setup_();
+  if (!ss.getSheetByName(SHEET_PRODUCTS) || !ss.getSheetByName(SHEET_MOVES) || !ss.getSheetByName(SHEET_FOLDERS)) setup_();
 }
 
 function readProducts_() {
@@ -276,8 +306,75 @@ function productToJson_(r) {
     minQty: Math.round(Number(r[P.min]) || 0),
     buyPrice: r[P.buy] === '' || r[P.buy] == null ? null : Number(r[P.buy]),
     sellPrice: r[P.sell] === '' || r[P.sell] == null ? null : Number(r[P.sell]),
-    note: String(r[P.note] || '')
+    note: String(r[P.note] || ''),
+    category: String(r[P.cat] || ''),
+    photoId: photoIdFromUrl_(r[P.photo])
   };
+}
+
+function readFolders_() {
+  var sh = SpreadsheetApp.getActive().getSheetByName(SHEET_FOLDERS);
+  if (!sh) return [];
+  var last = sh.getLastRow();
+  if (last < 2) return [];
+  return sh.getRange(2, 1, last - 1, 1).getValues().map(function (r) { return cleanPath_(r[0]); }).filter(String);
+}
+
+/* ------------------------------------------------------------------ */
+/* Termékfotók (Google Drive)                                         */
+/* ------------------------------------------------------------------ */
+
+function photoFolder_() {
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty('PHOTO_FOLDER_ID');
+  if (id) {
+    try { var f = DriveApp.getFolderById(id); if (!f.isTrashed()) return f; } catch (e) {}
+  }
+  var it = DriveApp.getFoldersByName(PHOTO_FOLDER_NAME);
+  var folder = it.hasNext() ? it.next() : DriveApp.createFolder(PHOTO_FOLDER_NAME);
+  props.setProperty('PHOTO_FOLDER_ID', folder.getId());
+  return folder;
+}
+
+function photoIdFromUrl_(v) {
+  var m = String(v || '').match(/[-\w]{25,}/);
+  return m ? m[0] : '';
+}
+
+/** req = {productId, mime, data(base64)} → a fotót a Drive-ra menti, a termék Kép oszlopába a linket írja. */
+function photo_(req) {
+  setupIfNeeded_();
+  if (!req.productId || !req.data) return { ok: false, error: 'bad_request' };
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return { ok: false, error: 'busy' };
+  try {
+    var ps = SpreadsheetApp.getActive().getSheetByName(SHEET_PRODUCTS);
+    var last = ps.getLastRow();
+    if (last < 2) return { ok: false, error: 'unknown_product' };
+    var ids = ps.getRange(2, 1, last - 1, 1).getValues();
+    var row = -1;
+    for (var i = 0; i < ids.length; i++) if (String(ids[i][0]) === String(req.productId)) { row = i + 2; break; }
+    if (row < 0) return { ok: false, error: 'unknown_product' };
+    var r = ps.getRange(row, 1, 1, P_HEAD.length).getValues()[0];
+    var old = photoIdFromUrl_(r[P.photo]);
+    if (old) { try { DriveApp.getFileById(old).setTrashed(true); } catch (e) {} }
+    var name = (r[P.ean] ? String(r[P.ean]) + ' - ' : '') + String(r[P.name] || req.productId);
+    var blob = Utilities.newBlob(Utilities.base64Decode(req.data), req.mime || 'image/jpeg', name.slice(0, 80) + '.jpg');
+    var file = photoFolder_().createFile(blob);
+    var url = 'https://drive.google.com/file/d/' + file.getId() + '/view';
+    ps.getRange(row, P.photo + 1).setValue(url);
+    return { ok: true, photoId: file.getId() };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** req = {photoId} → a kép base64-ben (a telefonra töltéshez). */
+function photoGet_(req) {
+  if (!req.photoId) return { ok: false, error: 'bad_request' };
+  var file = DriveApp.getFileById(String(req.photoId));
+  var b = file.getBlob();
+  return { ok: true, mime: b.getContentType(), data: Utilities.base64Encode(b.getBytes()) };
 }
 
 function readMoves_(from, to, productId) {
@@ -310,7 +407,9 @@ var IMPORT_FIELDS = {
   qty: ['keszlet', 'mennyiseg', 'darabszam', 'quantity', 'qty', 'stock', 'darab'],
   min: ['minimalis', 'minimum', 'min'],
   buy: ['beszerzesi', 'beszerzes', 'bekerulesi', 'purchase', 'cost'],
-  sell: ['eladasi', 'fogyasztoi', 'sale price', 'selling', 'price', 'ar']
+  sell: ['eladasi', 'fogyasztoi', 'sale price', 'selling', 'price', 'ar'],
+  cat: ['kategoria', 'csoport', 'mappa', 'category', 'group'],
+  note: ['leiras', 'megjegyzes', 'description', 'note']
 };
 
 function menuImport() {
@@ -331,7 +430,7 @@ function importFromSheet_() {
   if (hi < 0) return { ok: false, message: 'Az Import lapon nem találtam fejlécet. Másold be a StoDo exportot a fejléc sorral együtt.' };
   var head = data[hi].map(function (h) { return fold_(h); });
   var col = {}, used = {};
-  ['name', 'ean', 'sku', 'qty', 'min', 'buy', 'sell'].forEach(function (f) {
+  ['name', 'ean', 'sku', 'qty', 'min', 'buy', 'sell', 'cat', 'note'].forEach(function (f) {
     var keys = IMPORT_FIELDS[f];
     for (var k = 0; k < keys.length; k++) {
       for (var c = 0; c < head.length; c++) {
@@ -355,7 +454,7 @@ function importFromSheet_() {
       if (r[P.ean]) byEan[normEan_(r[P.ean])] = i;
       byName[fold_(r[P.name])] = i;
     });
-    var now = new Date(), created = 0, updated = 0, moves = [];
+    var now = new Date(), created = 0, updated = 0, moves = [], newFolders = {};
     for (var j = hi + 1; j < data.length; j++) {
       var d = data[j];
       var name = String(d[col.name] || '').trim();
@@ -381,6 +480,8 @@ function importFromSheet_() {
       if (col.min != null && parseNum_(d[col.min]) != null) r[P.min] = Math.max(0, Math.round(parseNum_(d[col.min])));
       if (col.buy != null && parseNum_(d[col.buy]) != null) r[P.buy] = parseNum_(d[col.buy]);
       if (col.sell != null && parseNum_(d[col.sell]) != null) r[P.sell] = parseNum_(d[col.sell]);
+      if (col.cat != null && String(d[col.cat]).trim()) { r[P.cat] = cleanPath_(d[col.cat]); newFolders[r[P.cat]] = true; }
+      if (col.note != null && String(d[col.note]).trim()) r[P.note] = String(d[col.note]).trim();
       if (col.qty != null && parseNum_(d[col.qty]) != null) {
         var q = Math.round(parseNum_(d[col.qty]));
         var delta = q - (Number(r[P.qty]) || 0);
@@ -395,6 +496,14 @@ function importFromSheet_() {
     if (last > 1) ps.getRange(2, 1, last - 1, P_HEAD.length).clearContent();
     if (rows.length) ps.getRange(2, 1, rows.length, P_HEAD.length).setValues(rows);
     if (moves.length) ms.getRange(ms.getLastRow() + 1, 1, moves.length, M_HEAD.length).setValues(moves);
+    var fs = ss.getSheetByName(SHEET_FOLDERS);
+    var fset = {};
+    readFolders_().forEach(function (f) { fset[f] = true; });
+    Object.keys(newFolders).forEach(function (f) { if (f) fset[f] = true; });
+    var fl = Object.keys(fset).sort();
+    var fLast = fs.getLastRow();
+    if (fLast > 1) fs.getRange(2, 1, fLast - 1, 1).clearContent();
+    if (fl.length) fs.getRange(2, 1, fl.length, 1).setValues(fl.map(function (f) { return [f]; }));
   } finally {
     lock.releaseLock();
   }
@@ -410,6 +519,11 @@ function normEan_(s) { return String(s || '').replace(/\s+/g, '').replace(/^0+/,
 
 function fold_(s) {
   return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+}
+
+/** "Mosószer / Mosógél" → "Mosószer/Mosógél" (a StoDo „>” elválasztóját is kezeli) */
+function cleanPath_(s) {
+  return String(s || '').split(/[\/>]/).map(function (x) { return x.trim(); }).filter(String).join('/');
 }
 
 function numOr_(v, d) { var n = Number(v); return isFinite(n) ? n : d; }

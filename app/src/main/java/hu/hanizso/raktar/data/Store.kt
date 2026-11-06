@@ -13,7 +13,7 @@ import kotlinx.serialization.encodeToString
 import java.io.File
 import java.util.UUID
 
-data class SyncOutcome(val pushed: PushResult?, val pulled: Boolean)
+data class SyncOutcome(val pushed: PushResult?, val pulled: Boolean, val photoError: String? = null)
 
 /**
  * A telefon helyi adattára. Minden változás azonnal fájlba íródik,
@@ -22,6 +22,10 @@ data class SyncOutcome(val pushed: PushResult?, val pulled: Boolean)
 class Store private constructor(private val ctx: Context) {
 
     private val file = File(ctx.filesDir, "state.json")
+    private val photoDir = File(ctx.filesDir, "photos").apply { mkdirs() }
+
+    /** A termék helyi fotója (lehet, hogy nem létezik). */
+    fun photoFile(productId: String) = File(photoDir, "$productId.jpg")
     private val prefs = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val lock = Mutex()
     private val syncLock = Mutex()
@@ -105,7 +109,42 @@ class Store private constructor(private val ctx: Context) {
         }
     }
 
+    /** Új fotó a termékhez: helyben elmenti, a következő szinkronnál feltölti. */
+    suspend fun setPhoto(productId: String, jpeg: ByteArray) {
+        withContext(Dispatchers.IO) { photoFile(productId).writeBytes(jpeg) }
+        update { s -> s.copy(pendingPhotos = (s.pendingPhotos - productId) + productId) }
+    }
+
+    /** Ha a fotó nincs meg a telefonon, de a Drive-on igen, letölti. */
+    suspend fun ensurePhoto(p: Product): File? {
+        val f = photoFile(p.id)
+        if (f.exists()) return f
+        if (p.photoId.isBlank() || !isConfigured) return null
+        return try {
+            val bytes = Api.downloadPhoto(_settings.value, p.photoId)
+            withContext(Dispatchers.IO) { f.writeBytes(bytes) }
+            f
+        } catch (e: Exception) { null }
+    }
+
+    suspend fun addFolder(path: String) {
+        val clean = path.split('/').map { it.trim() }.filter { it.isNotEmpty() }.joinToString("/")
+        if (clean.isEmpty()) return
+        update { s -> s.copy(pendingFolders = (s.pendingFolders + clean).distinct(), pendingFolderDeletes = s.pendingFolderDeletes - clean) }
+    }
+
+    suspend fun deleteFolder(path: String) {
+        update { s ->
+            s.copy(
+                pendingFolders = s.pendingFolders.filterNot { it == path || it.startsWith("$path/") },
+                pendingFolderDeletes = (s.pendingFolderDeletes + path).distinct(),
+            )
+        }
+    }
+
     suspend fun deleteProduct(id: String) {
+        withContext(Dispatchers.IO) { photoFile(id).delete() }
+        update { s -> s.copy(pendingPhotos = s.pendingPhotos - id) }
         update { s ->
             val onServer = s.serverProducts.any { it.id == id }
             if (onServer) {
@@ -134,28 +173,61 @@ class Store private constructor(private val ctx: Context) {
         val snap = _state.value
         if (snap.pendingCount == 0) {
             val r = Api.pull(set)
-            update { s -> s.copy(serverProducts = r.products ?: s.serverProducts, serverMoves = r.moves ?: s.serverMoves, lastSync = System.currentTimeMillis()) }
+            update { s -> s.copy(serverProducts = r.products ?: s.serverProducts, serverMoves = r.moves ?: s.serverMoves,
+                serverFolders = r.folders ?: s.serverFolders, lastSync = System.currentTimeMillis()) }
             return SyncOutcome(null, true)
         }
-        val req = PushRequest(
-            key = set.key, device = set.deviceName,
-            products = snap.pendingProducts, deletes = snap.pendingDeletes, moves = snap.pendingMoves,
-        )
-        val r = Api.push(set, req)
-        val sentMoves = snap.pendingMoves.map { it.id }.toSet()
-        val sentProducts = snap.pendingProducts.toSet()
-        val sentDeletes = snap.pendingDeletes.toSet()
-        update { s ->
-            s.copy(
-                serverProducts = r.products ?: s.serverProducts,
-                serverMoves = r.moves ?: s.serverMoves,
-                pendingMoves = s.pendingMoves.filterNot { it.id in sentMoves },
-                pendingProducts = s.pendingProducts.filterNot { it in sentProducts },
-                pendingDeletes = s.pendingDeletes.filterNot { it in sentDeletes },
-                lastSync = System.currentTimeMillis(),
+        var result: PushResult? = null
+        val needPush = snap.pendingMoves.isNotEmpty() || snap.pendingProducts.isNotEmpty() || snap.pendingDeletes.isNotEmpty() ||
+            snap.pendingFolders.isNotEmpty() || snap.pendingFolderDeletes.isNotEmpty()
+        if (needPush) {
+            val req = PushRequest(
+                key = set.key, device = set.deviceName,
+                products = snap.pendingProducts, deletes = snap.pendingDeletes, moves = snap.pendingMoves,
+                folders = snap.pendingFolders, folderDeletes = snap.pendingFolderDeletes,
             )
+            val r = Api.push(set, req)
+            result = r.result
+            val sentMoves = snap.pendingMoves.map { it.id }.toSet()
+            val sentProducts = snap.pendingProducts.toSet()
+            val sentDeletes = snap.pendingDeletes.toSet()
+            val sentFolders = snap.pendingFolders.toSet()
+            val sentFolderDeletes = snap.pendingFolderDeletes.toSet()
+            update { s ->
+                s.copy(
+                    serverProducts = r.products ?: s.serverProducts,
+                    serverMoves = r.moves ?: s.serverMoves,
+                    serverFolders = r.folders ?: s.serverFolders,
+                    pendingMoves = s.pendingMoves.filterNot { it.id in sentMoves },
+                    pendingProducts = s.pendingProducts.filterNot { it in sentProducts },
+                    pendingDeletes = s.pendingDeletes.filterNot { it in sentDeletes },
+                    pendingFolders = s.pendingFolders.filterNot { it in sentFolders },
+                    pendingFolderDeletes = s.pendingFolderDeletes.filterNot { it in sentFolderDeletes },
+                    lastSync = System.currentTimeMillis(),
+                )
+            }
         }
-        SyncOutcome(r.result, false)
+        // Fotók feltöltése egyenként (ha egy nem sikerül, a többi még mehet, ez marad a sorban)
+        var photoError: String? = null
+        for (pid in _state.value.pendingPhotos.toList()) {
+            val f = photoFile(pid)
+            if (!f.exists() || _state.value.serverProducts.none { it.id == pid }) {
+                if (!f.exists()) update { s -> s.copy(pendingPhotos = s.pendingPhotos - pid) }
+                continue
+            }
+            try {
+                val bytes = withContext(Dispatchers.IO) { f.readBytes() }
+                val photoId = Api.uploadPhoto(set, pid, bytes)
+                update { s -> s.copy(
+                    pendingPhotos = s.pendingPhotos - pid,
+                    serverProducts = s.serverProducts.map { if (it.id == pid) it.copy(photoId = photoId) else it },
+                ) }
+            } catch (e: Exception) {
+                photoError = e.message
+            }
+        }
+        if (!needPush) update { s -> s.copy(lastSync = System.currentTimeMillis()) }
+        SyncOutcome(result, false, photoError)
     }
 
     suspend fun testConnection(s: Settings) { Api.ping(s) }

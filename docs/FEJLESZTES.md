@@ -40,6 +40,10 @@
 - [ ] Bevét +10 mennyiséggel.
 - [ ] Napló: napok, összesítés, eszköznév.
 - [ ] Bluetooth vonalkódolvasó (ha lesz).
+- [ ] Új termék fotóval (kamera és galéria), a fotó megjelenik a Drive „HaNiZso Raktár képek” mappájában.
+- [ ] EAN beolvasása az űrlapon a „Beolvasás” gombbal.
+- [ ] Mappa és almappa létrehozása, termék áthelyezése, üres mappa törlése.
+- [ ] Keresés ékezet nélkül (pl. „sotet” → „Sötét”).
 
 ## Kiadás menete
 1. Módosítás → commit → push a `main`-re.
