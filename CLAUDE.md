@@ -79,7 +79,7 @@ Az Apps Script POST válasza 302 → googleusercontent GET; az OkHttp ezt helyes
   - `ui/AppViewModel.kt` – vonalkód-kezelés, hang+rezgés, csomagolás vége összesítő
   - `ui/Scanner.kt` – CameraX + ML Kit (beépített modell); ugyanaz a kód csak 1,5 s „eltűnés” után számít újra
   - `ui/Screens.kt` – főképernyő, Kiadás / Bevét / Napló fül, beállítások, összesítő
-  - `ui/Stock.kt` – Készlet fül mappanézettel (morzsamenü, almappák, új/üres mappa törlése), ékezetfüggetlen keresés (`fold()`), bélyegképek
+  - `ui/Stock.kt` – Készlet fül mappanézettel (morzsamenü, almappák, új/üres mappa törlése), ékezetfüggetlen keresés (`fold()`), bélyegképek, „Beolvasás” gomb: keresés vonalkóddal levonás nélkül
   - `ui/ProductScreen.kt` – teljes képernyős termék-űrlap: fotó (kamera/galéria), EAN beolvasás kamerával, mappaválasztó, leírás
   - `data/ImageUtil.kt` – fotó elforgatása (EXIF), kicsinyítés max. 1280 px, JPEG 80%, bélyegkép-gyorsítótár
   - `ui/Theme.kt` – színek (zöld-teal elsődleges, OK/Figyelem/Hiba színek)
@@ -95,7 +95,7 @@ Az Apps Script POST válasza 302 → googleusercontent GET; az OkHttp ezt helyes
   (gitignore-ban!) vagy környezeti változókból: `KEYSTORE_PATH`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`, `VERSION_CODE`.
 - CI: `.github/workflows/build.yml` – push a `main`-re → aláírt APK, **versionCode = 100 + run_number**
   (hogy mindig nagyobb legyen a helyben fordított 1.0.x verzióknál), GitHub Release `v1.0.<versionCode>` taggel.
-- Helyi kiadásnál mindig adj meg növekvő `VERSION_CODE`-ot (eddig: 1 = 1.0.1, 2 = 1.0.2, 3 = 1.0.3). Titkok: `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_PASSWORD`, `KEY_ALIAS` (=`raktar`).
+- Helyi kiadásnál mindig adj meg növekvő `VERSION_CODE`-ot (eddig: 1 = 1.0.1, 2 = 1.0.2, 3 = 1.0.3, 4 = 1.0.4). Titkok: `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_PASSWORD`, `KEY_ALIAS` (=`raktar`).
 - A kulcstár (`hanizso-raktar.jks`, alias `raktar`) a felhasználónál van. **Soha ne commitold, ne generálj újat**
   (más kulccsal aláírt APK nem frissíti a telepítettet). Ha kell, kérd el tőle.
 - Az első APK (1.0.1, versionCode 1) helyben készült és alá van írva ugyanazzal a kulccsal.

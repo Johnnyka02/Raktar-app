@@ -13,6 +13,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -88,6 +91,7 @@ fun StockScreen(
     var filter by rememberSaveable { mutableStateOf("all") }
     var newFolder by remember { mutableStateOf(false) }
     var deleteFolder by remember { mutableStateOf<String?>(null) }
+    var scanSearch by remember { mutableStateOf(false) }
 
     val scope = products.filter { inFolder(it, folder) }
     val units = scope.sumOf { it.qty.coerceAtLeast(0) }
@@ -123,8 +127,12 @@ fun StockScreen(
             }
             Text("${scope.size} termék · $units db · készletérték ${ftHu(value)}", style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-            OutlinedTextField(q, { q = it }, label = { Text(if (folder.isEmpty()) "Keresés: név, márka, EAN, cikkszám" else "Keresés ebben a mappában") },
-                singleLine = true, modifier = Modifier.fillMaxWidth())
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(q, { q = it }, label = { Text(if (folder.isEmpty()) "Keresés: név, márka, EAN, cikkszám" else "Keresés ebben a mappában") },
+                    singleLine = true, modifier = Modifier.weight(1f))
+                // Csak keresés vonalkóddal: nem von le semmit a készletből
+                OutlinedButton(onClick = { scanSearch = true }) { Text("Beolvasás") }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 FilterChip(filter == "all", { filter = "all" }, { Text("Mind") })
                 FilterChip(filter == "low", { filter = "low" }, { Text("Kevés") })
@@ -176,6 +184,26 @@ fun StockScreen(
                     }
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline)
                 }
+            }
+        }
+    }
+
+    if (scanSearch) {
+        Dialog(onDismissRequest = { scanSearch = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Column(Modifier.fillMaxWidth().padding(16.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp)).padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Keresés vonalkóddal", style = MaterialTheme.typography.titleMedium)
+                Text("Csak megkeresi a terméket, a készletből nem von le semmit.", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                CameraScanner(Modifier.fillMaxWidth().height(300.dp)) { code ->
+                    if (scanSearch) {
+                        scanSearch = false
+                        val hit = vm.findByCode(code)
+                        if (hit != null) { onFolder(""); filter = "all"; q = hit.ean.ifBlank { hit.name } }
+                        else { onFolder(""); filter = "all"; q = code }
+                    }
+                }
+                TextButton(onClick = { scanSearch = false }, modifier = Modifier.align(Alignment.End)) { Text("Mégse") }
             }
         }
     }
