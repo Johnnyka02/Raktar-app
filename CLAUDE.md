@@ -81,6 +81,7 @@ Az Apps Script POST válasza 302 → googleusercontent GET; az OkHttp ezt helyes
   - `ui/ProductScreen.kt` – teljes képernyős termék-űrlap: fotó (kamera/galéria), EAN beolvasás kamerával, mappaválasztó, leírás
   - `data/ImageUtil.kt` – fotó elforgatása (EXIF), kicsinyítés max. 1280 px, JPEG 80%, bélyegkép-gyorsítótár
   - `ui/Theme.kt` – színek (zöld-teal elsődleges, OK/Figyelem/Hiba színek)
+- Arculat: a HaNiZso logó az app ikonja (`drawable-nodpi/ic_launcher_logo.png`, zöld logó fehér alapon, adaptív + monokróm) és halvány háttér a főképernyőn (`logo_watermark.png`, 6% átlátszóság, a téma szövegszínére színezve).
 - Fotók: helyben `filesDir/photos/<termékID>.jpg`, feltöltés a szinkron végén (`pendingPhotos`), egyenként; hiba esetén a sorban marad.
 - Mappák: `LocalState.folders()` = szerver + várakozó mappák + a termékek mappái (szülőkkel), mínusz törölt. Csak üres mappa törölhető.
 - Kamerás olvasásnál ugyanaz a kód csak 1,5 s „eltűnés” után számít újra; kézi/Bluetooth bevitelnél minden csippantás számít.
@@ -92,7 +93,7 @@ Az Apps Script POST válasza 302 → googleusercontent GET; az OkHttp ezt helyes
   (gitignore-ban!) vagy környezeti változókból: `KEYSTORE_PATH`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`, `VERSION_CODE`.
 - CI: `.github/workflows/build.yml` – push a `main`-re → aláírt APK, **versionCode = 100 + run_number**
   (hogy mindig nagyobb legyen a helyben fordított 1.0.x verzióknál), GitHub Release `v1.0.<versionCode>` taggel.
-- Helyi kiadásnál mindig adj meg növekvő `VERSION_CODE`-ot (eddig: 1 = 1.0.1, 2 = 1.0.2). Titkok: `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_PASSWORD`, `KEY_ALIAS` (=`raktar`).
+- Helyi kiadásnál mindig adj meg növekvő `VERSION_CODE`-ot (eddig: 1 = 1.0.1, 2 = 1.0.2, 3 = 1.0.3). Titkok: `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_PASSWORD`, `KEY_ALIAS` (=`raktar`).
 - A kulcstár (`hanizso-raktar.jks`, alias `raktar`) a felhasználónál van. **Soha ne commitold, ne generálj újat**
   (más kulccsal aláírt APK nem frissíti a telepítettet). Ha kell, kérd el tőle.
 - Az első APK (1.0.1, versionCode 1) helyben készült és alá van írva ugyanazzal a kulccsal.

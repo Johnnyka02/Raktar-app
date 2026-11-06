@@ -2,7 +2,12 @@
 
 package hu.hanizso.raktar.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import hu.hanizso.raktar.R
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -181,7 +186,15 @@ fun MainScreen(vm: AppViewModel = viewModel()) {
         snackbarHost = { SnackbarHost(snack) },
         containerColor = MaterialTheme.colorScheme.background,
     ) { pad ->
-        Column(Modifier.padding(pad).fillMaxSize()) {
+        Box(Modifier.padding(pad).fillMaxSize()) {
+            // Halvány HaNiZso logó a háttérben
+            Image(
+                painter = painterResource(R.drawable.logo_watermark), contentDescription = null,
+                colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onBackground),
+                alpha = 0.06f, contentScale = ContentScale.Fit,
+                modifier = Modifier.align(Alignment.Center).fillMaxWidth(0.85f),
+            )
+        Column(Modifier.fillMaxSize()) {
             if (!vm.store.isConfigured) {
                 Banner("Az első használat előtt add meg a web app címét és a kulcsot a Beállításokban.") { showSettings = true }
             }
@@ -194,6 +207,7 @@ fun MainScreen(vm: AppViewModel = viewModel()) {
                 )
                 Tab.LOG -> LogScreen(state.serverMoves, state.pendingMoves)
             }
+        }
         }
     }
 
