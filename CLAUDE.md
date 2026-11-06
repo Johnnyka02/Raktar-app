@@ -104,8 +104,9 @@ Az Apps Script POST válasza 302 → googleusercontent GET; az OkHttp ezt helyes
 - `data/Updater.kt`: a GitHub Releases `latest` kiadását nézi (`api.github.com/repos/Johnnyka02/Raktar-app/releases/latest`, hitelesítés nélkül → **a tárolónak nyilvánosnak kell lennie**).
 - A címke formátuma `v1.0.<versionCode>`, a melléklet az APK. Ha a címke száma > `BuildConfig.VERSION_CODE`, az app felajánlja a frissítést (indításkor naponta 1×, és a Beállításokban kézzel).
 - Letöltés `cacheDir/updates/`-be, telepítés FileProvider + `REQUEST_INSTALL_PACKAGES`; első alkalommal az „ismeretlen forrás” engedélyt kéri.
-- **Új verzió kiadása innen:** `VERSION_CODE=<n> ./gradlew assembleRelease`, majd
-  `gh release create v1.0.<n> app/build/outputs/apk/release/app-release.apk#HaNiZso-Raktar-1.0.<n>.apk -R Johnnyka02/Raktar-app --title "HaNiZso Raktár 1.0.<n>" --notes "<mi változott, magyarul>"`.
+- **Új verzió kiadása:** a Claude-munkamenet NEM hozhat létre GitHub Release-t (403). A kiadást a CI készíti:
+  push a `main`-re → GitHub Actions aláírja (titkok kellenek) → Release `v1.0.<100+run_number>` az APK-val → az appok felajánlják.
+  A kiadás leírása a commit üzenet; írd magyarul és érthetően.
 - A tárolóban nincs titok (kulcs, URL, jelszó); a korábbi commitok a tulajdonos Gmail-címét tartalmazhatják.
 
 ## Ismert környezeti buktatók (Claude felhős munkamenet)
