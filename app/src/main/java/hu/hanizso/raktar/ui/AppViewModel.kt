@@ -29,7 +29,8 @@ import java.time.ZoneId
 enum class Tab { OUT, IN, STOCK, LOG }
 
 sealed class ScanResult {
-    data class Done(val product: Product, val move: Move, val qtyAfter: Int, val minQty: Int, val undone: Boolean = false) : ScanResult()
+    /** sessionTotal: ebből a termékből ebben a csomagolásban összesen (pl. -4) */
+    data class Done(val product: Product, val move: Move, val qtyAfter: Int, val minQty: Int, val undone: Boolean = false, val sessionTotal: Int = move.delta) : ScanResult()
     data class Unknown(val code: String) : ScanResult()
     data class Info(val text: String) : ScanResult()
 }
@@ -134,7 +135,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             ?: list.firstOrNull { it.sku.isNotBlank() && it.sku.equals(c, ignoreCase = true) }
     }
 
-    fun onCode(raw: String) {
+    /** Ebben a csomagolásban termékenként és módonként összesen (kulcs: "kiadás:<id>"), a „Csomagolás vége” nullázza. */
+    private val sessionTotals = mutableMapOf<String, Int>()
+    private var lastCameraProduct: String? = null
+    private var lastCameraTime = 0L
+
+    fun onCode(raw: String, fromCamera: Boolean = false) {
         val code = raw.trim().replace(Regex("\\s+"), "")
         if (code.isEmpty()) return
         val p = findByCode(code)
@@ -143,13 +149,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             _scan.value = ScanResult.Unknown(code)
             return
         }
+        // Kamera: ugyanazt a terméket 2,5 mp-en belül nem vonjuk le újra (pl. két vonalkód a dobozon)
+        val now = System.currentTimeMillis()
+        if (fromCamera) {
+            if (p.id == lastCameraProduct && now - lastCameraTime < 2500) return
+            lastCameraProduct = p.id; lastCameraTime = now
+        }
         val delta = if (tab.value == Tab.IN) inQty.value.coerceAtLeast(1) else -1
         val type = if (tab.value == Tab.IN) MoveType.IN else MoveType.OUT
         viewModelScope.launch {
             val m = store.addMove(p, delta, type)
             val after = m.qtyAfter ?: (p.qty + delta)
+            val key = "$type:${p.id}"
+            val total = (sessionTotals[key] ?: 0) + delta
+            sessionTotals[key] = total
             feedback(true, warn = after <= p.minQty)
-            _scan.value = ScanResult.Done(p, m, after, p.minQty)
+            _scan.value = ScanResult.Done(p, m, after, p.minQty, sessionTotal = total)
         }
     }
 
@@ -157,7 +172,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             store.undoMove(r.move)
             val now = state.value.products().firstOrNull { it.id == r.product.id }?.qty ?: (r.qtyAfter - r.move.delta)
-            _scan.value = r.copy(qtyAfter = now, undone = true)
+            val key = "${r.move.type}:${r.product.id}"
+            val total = (sessionTotals[key] ?: r.move.delta) - r.move.delta
+            sessionTotals[key] = total
+            lastCameraProduct = null
+            _scan.value = r.copy(qtyAfter = now, undone = true, sessionTotal = total)
         }
     }
 
@@ -226,6 +245,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 try { store.sync() } catch (e: Exception) { err = e.message } finally { _syncing.value = false }
             } else err = "Nincs beállítva a szerver, ezért nem lett elküldve."
             val low = state.value.products().filter { it.level != StockLevel.OK }.sortedBy { it.qty }
+            sessionTotals.clear()
             _summary.value = Summary(lines, lines.sumOf { it.units }, low, err, if (err == null) pendingBefore else 0)
         }
     }

@@ -30,6 +30,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -78,12 +79,14 @@ fun CameraScanner(modifier: Modifier = Modifier, onCode: (String) -> Unit) {
             ).build()
         )
     }
-    val previewView = remember { PreviewView(ctx).apply { scaleType = PreviewView.ScaleType.FILL_CENTER } }
+    // COMPATIBLE (TextureView): a kép nem lóg ki a dobozból a többi elem fölé
+    val previewView = remember { PreviewView(ctx).apply { scaleType = PreviewView.ScaleType.FILL_CENTER; implementationMode = PreviewView.ImplementationMode.COMPATIBLE } }
 
     DisposableEffect(lifecycle) {
         val future = ProcessCameraProvider.getInstance(ctx)
-        var lastCode: String? = null
-        var lastSeen = 0L
+        // kódonként: mikor láttuk utoljára, és mikor számoltuk utoljára
+        val seen = HashMap<String, Long>()
+        val counted = HashMap<String, Long>()
         future.addListener({
             val provider = future.get()
             val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
@@ -99,11 +102,13 @@ fun CameraScanner(modifier: Modifier = Modifier, onCode: (String) -> Unit) {
                         val v = codes.firstOrNull { !it.rawValue.isNullOrBlank() }?.rawValue
                         val now = System.currentTimeMillis()
                         if (v != null) {
-                            if (v != lastCode || now - lastSeen > 1500) {
-                                lastCode = v
+                            val gone = now - (seen[v] ?: 0L) > 1200      // közben kikerült a képből
+                            val waited = now - (counted[v] ?: 0L) > 2500  // és eltelt legalább 2,5 mp
+                            if (gone && waited) {
+                                counted[v] = now
                                 ContextCompat.getMainExecutor(ctx).execute { callback(v) }
                             }
-                            lastSeen = now
+                            seen[v] = now
                         }
                     }
                     .addOnCompleteListener { proxy.close() }
@@ -118,7 +123,7 @@ fun CameraScanner(modifier: Modifier = Modifier, onCode: (String) -> Unit) {
         }
     }
 
-    Box(modifier.background(Color.Black)) {
+    Box(modifier.clipToBounds().background(Color.Black)) {
         AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
         // célzó keret
         Box(

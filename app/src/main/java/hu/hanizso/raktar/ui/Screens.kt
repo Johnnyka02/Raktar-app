@@ -258,7 +258,7 @@ private fun ScanScreen(vm: AppViewModel, tab: Tab, onNew: (String) -> Unit) {
         }
 
         if (camera) {
-            CameraScanner(Modifier.fillMaxWidth().height(240.dp).background(Color.Black, RoundedCornerShape(12.dp))) { vm.onCode(it) }
+            CameraScanner(Modifier.fillMaxWidth().height(240.dp).background(Color.Black, RoundedCornerShape(12.dp))) { vm.onCode(it, fromCamera = true) }
         }
 
         if (tab == Tab.IN) {
@@ -319,9 +319,15 @@ private fun ResultCard(r: ScanResult, onUndo: (ScanResult.Done) -> Unit, onNew: 
                 Text(r.product.name, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface.let { if (bg == MaterialTheme.colorScheme.surfaceVariant) it else Color(0xFF16201C) })
                 if (r.undone) {
                     Text("Visszavonva. Készlet: ${r.qtyAfter} db")
+                    if (r.sessionTotal != 0) Text("Ebben a csomagolásban eddig: ${if (r.sessionTotal > 0) "+" else ""}${r.sessionTotal} db")
                 } else {
-                    Text((if (r.move.delta > 0) "+" else "") + "${r.move.delta} db", fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, color = fg)
-                    Text("Maradt: ${r.qtyAfter} db", color = Color(0xFF16201C))
+                    // Nagy szám: ebből a termékből ebben a csomagolásban összesen
+                    Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text((if (r.sessionTotal > 0) "+" else "") + "${r.sessionTotal} db", fontSize = 40.sp, fontWeight = FontWeight.ExtraBold, color = fg)
+                        Text(if (r.sessionTotal == r.move.delta) "ebben a csomagolásban" else "összesen ebben a csomagolásban",
+                            color = Color(0xFF16201C), modifier = Modifier.padding(bottom = 8.dp))
+                    }
+                    Text("Maradt: ${r.qtyAfter} db", color = Color(0xFF16201C), fontWeight = FontWeight.SemiBold)
                     when {
                         r.qtyAfter < 0 -> Text("Figyelem: a készlet mínuszba ment. Érdemes leltározni ezt a terméket.", color = BadRed)
                         r.qtyAfter == 0 -> Text("Elfogyott.", color = BadRed)
