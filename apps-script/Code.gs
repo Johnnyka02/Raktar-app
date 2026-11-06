@@ -528,6 +528,7 @@ function menuImportImages() {
 }
 
 function importImages_() {
+  var start = Date.now();   // a teljes futásidőt mérjük (a zip kibontása is beleszámít)
   setupIfNeeded_();
   var ss = SpreadsheetApp.getActive();
   var is = ss.getSheetByName(SHEET_IMG_IMPORT);
@@ -554,9 +555,9 @@ function importImages_() {
       byName[fold_(r[P.name])] = i;
     });
     var folder = photoFolder_();
-    var start = Date.now(), done = 0, had = 0, noProduct = 0, noImage = 0, timeout = false;
+    var done = 0, had = 0, noProduct = 0, noImage = 0, timeout = false;
     for (var k = 0; k < map.length; k++) {
-      if (Date.now() - start > 300000) { timeout = true; break; }
+      if (Date.now() - start > 240000) { timeout = true; break; }
       var m = map[k];
       if (!m[0]) continue;
       var ean = String(m[1] || '').trim();
@@ -568,9 +569,9 @@ function importImages_() {
       var name = (rows[idx][P.ean] ? String(rows[idx][P.ean]) + ' - ' : '') + String(rows[idx][P.name]);
       var file = folder.createFile(blob.copyBlob().setName(name.slice(0, 80) + '.jpg'));
       rows[idx][P.photo] = 'https://drive.google.com/file/d/' + file.getId() + '/view';
+      ps.getRange(idx + 2, P.photo + 1).setValue(rows[idx][P.photo]);   // azonnal mentjük, hogy megszakadáskor se legyen duplikátum
       done++;
     }
-    ps.getRange(2, P.photo + 1, rows.length, 1).setValues(rows.map(function (r) { return [r[P.photo]]; }));
   } finally {
     lock.releaseLock();
   }
