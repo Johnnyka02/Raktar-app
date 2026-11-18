@@ -141,12 +141,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val sessionTotals = mutableMapOf<String, Int>()
     private var lastCameraProduct: String? = null
     private var lastCameraTime = 0L
+    private var lastOkTime = 0L          // mikor volt az utolsó sikeres levonás/hozzáadás
+    private var lastUnknownCode: String? = null
+    private var lastUnknownTime = 0L
 
     fun onCode(raw: String, fromCamera: Boolean = false) {
         val code = raw.trim().replace(Regex("\\s+"), "")
         if (code.isEmpty()) return
         val p = findByCode(code)
         if (p == null) {
+            val t = System.currentTimeMillis()
+            if (fromCamera) {
+                // Kamerával: sikeres olvasás után 3 mp-ig a hibás/torz olvasatot csendben eldobjuk,
+                // különben felülírná a „Levonva” kártyát. Ugyanazt az ismeretlen kódot sem jelezzük újra 3 mp-ig.
+                if (t - lastOkTime < 3000) return
+                if (code == lastUnknownCode && t - lastUnknownTime < 3000) return
+            }
+            lastUnknownCode = code; lastUnknownTime = t
             feedback(false)
             _scan.value = ScanResult.Unknown(code)
             return
@@ -166,6 +177,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val total = (sessionTotals[key] ?: 0) + delta
             sessionTotals[key] = total
             scheduleAutoSync()
+            lastOkTime = System.currentTimeMillis()
             feedback(true, warn = after <= p.minQty)
             _scan.value = ScanResult.Done(p, m, after, p.minQty, sessionTotal = total)
         }

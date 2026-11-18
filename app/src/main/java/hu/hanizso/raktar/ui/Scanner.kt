@@ -43,10 +43,21 @@ import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import java.util.concurrent.Executors
 
+/** EAN-13 / EAN-8 / UPC-A ellenőrzőszám-vizsgálat; a torz olvasatot kiszűri. Más formátumnál mindig igaz. */
+private fun checksumOk(format: Int, raw: String): Boolean {
+    if (format != Barcode.FORMAT_EAN_13 && format != Barcode.FORMAT_EAN_8 && format != Barcode.FORMAT_UPC_A) return true
+    if (raw.isEmpty() || !raw.all { it in '0'..'9' }) return false
+    val digits = raw.map { it - '0' }
+    val body = digits.dropLast(1).reversed()
+    val sum = body.mapIndexed { i, d -> if (i % 2 == 0) d * 3 else d }.sum()
+    return (10 - sum % 10) % 10 == digits.last()
+}
+
 /**
- * Élő kamerás vonalkódolvasó. Ugyanazt a kódot csak akkor jelzi újra,
- * ha legalább 1,5 másodpercig nem volt a képen (így két egyforma termék
- * egymás után is beolvasható: elveszed, majd újra odatartod).
+ * Élő kamerás vonalkódolvasó. Egy kódot csak akkor fogad el, ha két egymás utáni
+ * képen is ugyanazt olvasta (a téves, egyszeri olvasatot eldobja). Ugyanazt a kódot
+ * csak akkor jelzi újra, ha legalább 1,2 másodpercig nem volt a képen (így két egyforma
+ * termék egymás után is beolvasható: elveszed, majd újra odatartod).
  */
 @Composable
 fun CameraScanner(modifier: Modifier = Modifier, onCode: (String) -> Unit) {
@@ -87,6 +98,11 @@ fun CameraScanner(modifier: Modifier = Modifier, onCode: (String) -> Unit) {
         // kódonként: mikor láttuk utoljára, és mikor számoltuk utoljára
         val seen = HashMap<String, Long>()
         val counted = HashMap<String, Long>()
+        // megerősítés: ugyanaz a kód két egymás utáni képen
+        var cand: String? = null
+        var candAt = 0L
+        var candHits = 0
+        var candEligible = false
         future.addListener({
             val provider = future.get()
             val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
@@ -99,16 +115,26 @@ fun CameraScanner(modifier: Modifier = Modifier, onCode: (String) -> Unit) {
                 val img = InputImage.fromMediaImage(media, proxy.imageInfo.rotationDegrees)
                 scanner.process(img)
                     .addOnSuccessListener { codes ->
-                        val v = codes.firstOrNull { !it.rawValue.isNullOrBlank() }?.rawValue
+                        val v = codes.firstOrNull { c ->
+                            val r = c.rawValue
+                            !r.isNullOrBlank() && checksumOk(c.format, r.trim())
+                        }?.rawValue
                         val now = System.currentTimeMillis()
                         if (v != null) {
-                            val gone = now - (seen[v] ?: 0L) > 1200      // közben kikerült a képből
-                            val waited = now - (counted[v] ?: 0L) > 2500  // és eltelt legalább 2,5 mp
-                            if (gone && waited) {
+                            if (v == cand && now - candAt < 800) {
+                                candHits++
+                            } else {
+                                cand = v; candHits = 1
+                                // közben kikerült a képből ÉS eltelt legalább 2,5 mp
+                                candEligible = now - (seen[v] ?: 0L) > 1200 && now - (counted[v] ?: 0L) > 2500
+                            }
+                            candAt = now
+                            seen[v] = now
+                            if (candHits >= 2 && candEligible) {
+                                candEligible = false
                                 counted[v] = now
                                 ContextCompat.getMainExecutor(ctx).execute { callback(v) }
                             }
-                            seen[v] = now
                         }
                     }
                     .addOnCompleteListener { proxy.close() }

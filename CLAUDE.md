@@ -78,7 +78,7 @@ Az Apps Script POST válasza 302 → googleusercontent GET; az OkHttp ezt helyes
   - `data/SyncWorker.kt` – háttérküldés
   - `RaktarApp.kt` – háttérbe kerüléskor ütemezi a küldést
   - `ui/AppViewModel.kt` – vonalkód-kezelés, hang+rezgés, csomagolás vége összesítő
-  - `ui/Scanner.kt` – CameraX + ML Kit (beépített modell), PreviewView COMPATIBLE módban (különben kilóg a dobozból); kódonként: újra csak ha ≥1,2 s-ig nem látszott ÉS ≥2,5 s telt el; a VM termékenként is 2,5 s-ig szűri a kamerás duplikátumot
+  - `ui/Scanner.kt` – CameraX + ML Kit (beépített modell), PreviewView COMPATIBLE módban (különben kilóg a dobozból); kódot csak két egymás utáni képen azonos olvasat után fogad el, EAN/UPC ellenőrzőszámot vizsgál; kódonként: újra csak ha ≥1,2 s-ig nem látszott ÉS ≥2,5 s telt el; a VM termékenként is 2,5 s-ig szűri a kamerás duplikátumot, és sikeres levonás után 3 s-ig csendben eldobja a kamerás „ismeretlen” olvasatot (nem írja felül a „Levonva” kártyát)
   - `ui/Screens.kt` – főképernyő, Kiadás / Bevét / Napló fül, beállítások, összesítő
   - `ui/Stock.kt` – Készlet fül mappanézettel (morzsamenü, almappák, új/üres mappa törlése), ékezetfüggetlen keresés (`fold()`), bélyegképek, „Beolvasás” gomb: keresés vonalkóddal levonás nélkül
   - `ui/ProductScreen.kt` – teljes képernyős termék-űrlap: fotó (kamera/galéria), EAN beolvasás kamerával, mappaválasztó, leírás

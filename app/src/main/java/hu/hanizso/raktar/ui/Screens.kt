@@ -304,6 +304,7 @@ private fun ResultCard(r: ScanResult, onUndo: (ScanResult.Done) -> Unit, onNew: 
         is ScanResult.Unknown -> ColoredCard(BadSoft, BadRed) {
             Text("Ismeretlen vonalkód", fontWeight = FontWeight.Bold, color = BadRed)
             Text(r.code, fontFamily = FontFamily.Monospace)
+            Text("Nem történt levonás.", fontWeight = FontWeight.SemiBold)
             Button(onClick = { onNew(r.code) }, modifier = Modifier.padding(top = 6.dp)) { Text("Új termék ezzel a kóddal") }
         }
         is ScanResult.Info -> ColoredCard(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurface) { Text(r.text) }
@@ -321,6 +322,7 @@ private fun ResultCard(r: ScanResult, onUndo: (ScanResult.Done) -> Unit, onNew: 
                     Text("Visszavonva. Készlet: ${r.qtyAfter} db")
                     if (r.sessionTotal != 0) Text("Ebben a csomagolásban eddig: ${if (r.sessionTotal > 0) "+" else ""}${r.sessionTotal} db")
                 } else {
+                    Text(if (r.move.delta < 0) "✔ Levonva" else "✔ Hozzáadva", fontWeight = FontWeight.Bold, color = fg)
                     // Nagy szám: ebből a termékből ebben a csomagolásban összesen
                     Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text((if (r.sessionTotal > 0) "+" else "") + "${r.sessionTotal} db", fontSize = 40.sp, fontWeight = FontWeight.ExtraBold, color = fg)
